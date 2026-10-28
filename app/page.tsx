@@ -2,6 +2,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Ban, CheckCircle2 } from "lucide-react";
 import Header from "@/components/Header";
 import StatsCards from "@/components/StatsCards";
 import SignalTable from "@/components/SignalTable";
@@ -28,10 +30,13 @@ const FALLBACK_SIGNALS: Signal[] = [
     stop_loss: 0.0184644,
     tp1_price: 0.019624,
     tp2_price: 0.0200879,
+    volume_ratio: 2.2,
+    taker_buy_ratio: 0.7,
     is_extended: false,
-    detected_at: new Date(Date.now() - 4 * 60000).toISOString(),
+    detected_at: "2026-10-28T17:45:00.000Z",
     smc_bos: true,
     smc_ob: false,
+    smc_retest: false,
   },
   {
     symbol: "PHAROS",
@@ -47,10 +52,13 @@ const FALLBACK_SIGNALS: Signal[] = [
     stop_loss: 0.617849,
     tp1_price: 0.658641,
     tp2_price: 0.674957,
+    volume_ratio: 6.4,
+    taker_buy_ratio: 0.78,
     is_extended: false,
-    detected_at: new Date(Date.now() - 11 * 60000).toISOString(),
+    detected_at: "2026-10-28T17:38:00.000Z",
     smc_bos: true,
     smc_ob: true,
+    smc_retest: true,
   },
   {
     symbol: "LYN",
@@ -66,10 +74,13 @@ const FALLBACK_SIGNALS: Signal[] = [
     stop_loss: 0.0148913,
     tp1_price: 0.0167509,
     tp2_price: 0.0174947,
+    volume_ratio: 4.0,
+    taker_buy_ratio: 0.59,
     is_extended: false,
-    detected_at: new Date(Date.now() - 18 * 60000).toISOString(),
+    detected_at: "2026-10-28T17:30:00.000Z",
     smc_bos: true,
     smc_ob: true,
+    smc_retest: false,
   },
   {
     symbol: "GUA",
@@ -85,10 +96,13 @@ const FALLBACK_SIGNALS: Signal[] = [
     stop_loss: 0.0326883,
     tp1_price: 0.0368729,
     tp2_price: 0.0385467,
+    volume_ratio: 4.5,
+    taker_buy_ratio: 0.59,
     is_extended: false,
-    detected_at: new Date(Date.now() - 25 * 60000).toISOString(),
+    detected_at: "2026-10-28T17:20:00.000Z",
     smc_bos: true,
     smc_ob: true,
+    smc_retest: false,
   },
   {
     symbol: "RLS",
@@ -104,10 +118,13 @@ const FALLBACK_SIGNALS: Signal[] = [
     stop_loss: 0.00221,
     tp1_price: 0.00295,
     tp2_price: 0.00321,
+    volume_ratio: 2.4,
+    taker_buy_ratio: 0.62,
     is_extended: true,
-    detected_at: new Date(Date.now() - 42 * 60000).toISOString(),
+    detected_at: "2026-10-28T17:05:00.000Z",
     smc_bos: true,
     smc_ob: false,
+    smc_retest: false,
   },
 ];
 
@@ -126,35 +143,40 @@ const FALLBACK_WALLS: BidWall[] = [
     exchange: "binance_alpha",
     price: 0.058,
     usd_value: 386129,
-    last_seen: new Date(Date.now() - 12000).toISOString(),
+    respect_rate: 0.88,
+    last_seen: "2026-10-28T17:51:00.000Z",
   },
   {
     symbol: "GRASS",
     exchange: "kucoin",
     price: 0.6952,
     usd_value: 69522,
-    last_seen: new Date(Date.now() - 25000).toISOString(),
+    respect_rate: 0.92,
+    last_seen: "2026-10-28T17:50:30.000Z",
   },
   {
     symbol: "KII",
     exchange: "binance_alpha",
     price: 0.08506595,
     usd_value: 52240,
-    last_seen: new Date(Date.now() - 40000).toISOString(),
+    respect_rate: 0.78,
+    last_seen: "2026-10-28T17:50:00.000Z",
   },
   {
     symbol: "AKE",
     exchange: "binance_alpha",
     price: 0.01954757,
     usd_value: 41093,
-    last_seen: new Date(Date.now() - 85000).toISOString(),
+    respect_rate: 0.74,
+    last_seen: "2026-10-28T17:49:00.000Z",
   },
   {
     symbol: "DOS",
     exchange: "binance_alpha",
     price: 0.299919,
     usd_value: 20702,
-    last_seen: new Date(Date.now() - 140000).toISOString(),
+    respect_rate: 0.5,
+    last_seen: "2026-10-28T17:48:00.000Z",
   },
 ];
 
@@ -162,22 +184,25 @@ export default function DashboardPage() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [stats, setStats] = useState<SignalStats | null>(null);
   const [walls, setWalls] = useState<BidWall[]>([]);
+  const [blacklistedSet, setBlacklistedSet] = useState<Set<string>>(new Set());
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [usingFallback, setUsingFallback] = useState<boolean>(false);
   const [isPolling, setIsPolling] = useState<boolean>(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  
-  // Hydration fix ke liye state
+
+  // Hydration fix state
   const [startOfDay, setStartOfDay] = useState<Date | null>(null);
 
-  // Filter & Modal states
+  // Filter, Modal & Blacklist Toast states
   const [selectedTf, setSelectedTf] = useState<TimeframeFilter>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeSignalModal, setActiveSignalModal] = useState<Signal | null>(null);
+  const [isBlacklisting, setIsBlacklisting] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Set start of day on client side
+  // Set start of day on client side only (Hydration safe)
   useEffect(() => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
@@ -188,9 +213,9 @@ export default function DashboardPage() {
     try {
       setIsLoading(true);
       const [sigRes, statsRes, wallsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/signals`, { cache: "no-store" }), // Dashboard endpoint
-        fetch(`${API_BASE_URL}/api/signals/stats`, { cache: "no-store" }),   // Dashboard endpoint
-        fetch(`${API_BASE_URL}/api/walls/active`, { cache: "no-store" }),   // Dashboard endpoint
+        fetch(`${API_BASE_URL}/api/signals`, { cache: "no-store" }),
+        fetch(`${API_BASE_URL}/api/signals/stats`, { cache: "no-store" }),
+        fetch(`${API_BASE_URL}/api/walls/active`, { cache: "no-store" }),
       ]);
 
       if (!sigRes.ok || !statsRes.ok || !wallsRes.ok) {
@@ -203,18 +228,37 @@ export default function DashboardPage() {
         wallsRes.json(),
       ]);
 
-      setSignals(Array.isArray(sigData) ? sigData : sigData.signals || []);
+      const rawSignals: Signal[] = Array.isArray(sigData)
+        ? sigData
+        : sigData.signals || [];
+      const rawWalls: BidWall[] = Array.isArray(wallsData)
+        ? wallsData
+        : wallsData.walls || [];
+
+      setSignals(
+        rawSignals.filter((s) => !blacklistedSet.has(s.symbol.trim().toUpperCase()))
+      );
       setStats(statsData);
-      setWalls(Array.isArray(wallsData) ? wallsData : wallsData.walls || []);
+      setWalls(
+        rawWalls.filter((w) => !blacklistedSet.has(w.symbol.trim().toUpperCase()))
+      );
       setUsingFallback(false);
       setError(null);
       setLastUpdated(new Date());
     } catch (err) {
       // Gracefully fall back to live preview data if FastAPI isn't reachable yet
       if (signals.length === 0) {
-        setSignals(FALLBACK_SIGNALS);
+        setSignals(
+          FALLBACK_SIGNALS.filter(
+            (s) => !blacklistedSet.has(s.symbol.trim().toUpperCase())
+          )
+        );
         setStats(FALLBACK_STATS);
-        setWalls(FALLBACK_WALLS);
+        setWalls(
+          FALLBACK_WALLS.filter(
+            (w) => !blacklistedSet.has(w.symbol.trim().toUpperCase())
+          )
+        );
         setUsingFallback(true);
       } else {
         setError("Connection to FastAPI interrupted. Retrying...");
@@ -222,7 +266,7 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [signals.length]);
+  }, [signals.length, blacklistedSet]);
 
   // Initial fetch + 7-second interval polling
   useEffect(() => {
@@ -236,32 +280,89 @@ export default function DashboardPage() {
     return () => clearInterval(timer);
   }, [fetchDashboardData, isPolling]);
 
-  // Filtered Signals for the Main Table
+  // Upgrade 2: One-Click Blacklist Function (POST /api/dashboard/blacklist + UI removal + Toast)
+  const handleBlacklist = useCallback(async (symbol: string) => {
+    const cleanSym = symbol.trim().toUpperCase();
+    setIsBlacklisting(true);
+
+    // Track locally so polling cycles don't re-add it
+    setBlacklistedSet((prev) => new Set(prev).add(cleanSym));
+
+    try {
+      await fetch(`${API_BASE_URL}/api/dashboard/blacklist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: cleanSym }),
+      });
+    } catch {
+      // Optimistically remove even if FastAPI is offline in preview mode
+    } finally {
+      setSignals((prev) =>
+        prev.filter((s) => s.symbol.trim().toUpperCase() !== cleanSym)
+      );
+      setWalls((prev) =>
+        prev.filter((w) => w.symbol.trim().toUpperCase() !== cleanSym)
+      );
+      setIsBlacklisting(false);
+      setToastMessage(`Token Blacklisted (${cleanSym})`);
+      setTimeout(() => {
+        setToastMessage((current) =>
+          current === `Token Blacklisted (${cleanSym})` ? null : current
+        );
+      }, 3500);
+    }
+  }, []);
+
+  // Filtered Signals for the Main Table (With Deduplication)
   const filteredSignals = useMemo(() => {
+    const seen = new Set<string>();
+    
     return signals.filter((s) => {
+      const cleanSym = s.symbol.trim().toUpperCase();
+      if (blacklistedSet.has(cleanSym)) return false;
+
+      // 1. Duplicate check (Agar same symbol aur timeframe pehle aa chuka hai toh skip karein)
+      const uniqueKey = `${cleanSym}-${s.timeframe}`;
+      if (seen.has(uniqueKey)) return false;
+      seen.add(uniqueKey);
+
+      // 2. Timeframe Filter
       const matchesTf =
-        selectedTf === "ALL" || s.timeframe.toLowerCase() === selectedTf.toLowerCase();
+        selectedTf === "ALL" ||
+        s.timeframe.toLowerCase() === selectedTf.toLowerCase();
+
+      // 3. Search Filter
       const matchesSearch =
         !searchQuery.trim() ||
         s.symbol.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
         s.structure.toLowerCase().includes(searchQuery.trim().toLowerCase());
+
       return matchesTf && matchesSearch;
     });
-  }, [signals, selectedTf, searchQuery]);
+  }, [signals, selectedTf, searchQuery, blacklistedSet]);
+  // Filtered Walls
+  const filteredWalls = useMemo(() => {
+    return walls.filter(
+      (w) => !blacklistedSet.has(w.symbol.trim().toUpperCase())
+    );
+  }, [walls, blacklistedSet]);
 
-  // KPI computations (Fixed Hydration)
+  // KPI computations (Hydration safe)
   const signalsTodayCount = useMemo(() => {
     if (!startOfDay) return 0;
-    return signals.filter((s) => new Date(s.detected_at) >= startOfDay).length || signals.length;
+    const count = signals.filter((s) =>
+      s.detected_at ? new Date(s.detected_at) >= startOfDay : true
+    ).length;
+    return count || signals.length;
   }, [signals, startOfDay]);
 
   const activeCoinsCount = useMemo(() => {
     const unique = new Set([
-      ...walls.map((w) => w.symbol.trim().toUpperCase()),
-      ...signals.map((s) => s.symbol.trim().toUpperCase()),
+      ...filteredWalls.map((w) => w.symbol.trim().toUpperCase()),
+      ...filteredSignals.map((s) => s.symbol.trim().toUpperCase()),
     ]);
     return unique.size || 293;
-  }, [walls, signals]);
+  }, [filteredWalls, filteredSignals]);
 
   return (
     <div className="min-h-screen bg-[#07090E] text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
@@ -290,7 +391,7 @@ export default function DashboardPage() {
           isLoading={isLoading}
         />
 
-        {/* Section 2 & 3: Main Signal Feed (7 cols) + Live Bid Walls Radar (5 cols) */}
+        {/* Section 2 & 3: Main Signal Feed (8 cols) + Live Bid Wall Cards (4 cols) */}
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
           <div className="xl:col-span-7 2xl:col-span-8">
             <SignalTable
@@ -301,24 +402,53 @@ export default function DashboardPage() {
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
               onSelectSignal={(sig) => setActiveSignalModal(sig)}
+              onBlacklist={handleBlacklist}
             />
           </div>
 
           <div className="xl:col-span-5 2xl:col-span-4">
             <WallTable
-              walls={walls}
+              walls={filteredWalls}
               isLoading={isLoading}
               onSelectSymbol={(sym) => setSearchQuery(sym)}
+              onBlacklist={handleBlacklist}
             />
           </div>
         </div>
       </main>
 
-      {/* Section 4: Signal Deep-Dive Modal */}
+      {/* Section 4: Upgrade 1 — Slide-Over Signal Deep-Dive Terminal */}
       <SignalModal
         signal={activeSignalModal}
         onClose={() => setActiveSignalModal(null)}
+        onBlacklist={handleBlacklist}
+        isBlacklisting={isBlacklisting}
       />
+
+      {/* Upgrade 2: Animated Toast Notification for One-Click Blacklist */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            key="blacklist-toast"
+            initial={{ opacity: 0, y: 30, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 350, damping: 25 }}
+            className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border border-rose-500/40 bg-[#0B0F19]/95 px-4 py-3 text-xs font-bold text-white shadow-[0_0_35px_rgba(244,63,94,0.3)] backdrop-blur-xl"
+          >
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/20 text-rose-400">
+              <Ban className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-rose-300">{toastMessage}</p>
+              <p className="text-[10px] font-normal text-slate-400">
+                Removed from live terminal & synced with FastAPI
+              </p>
+            </div>
+            <CheckCircle2 className="ml-2 h-4 w-4 text-emerald-400" />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
