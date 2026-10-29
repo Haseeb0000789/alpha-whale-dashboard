@@ -4,6 +4,7 @@
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BidWall, formatCryptoPrice, formatRelativeTime } from "@/types/types";
+import { WallCardsSkeleton } from "./Skeletons";
 import {
   Shield,
   ArrowUpDown,
@@ -32,10 +33,7 @@ export default function WallTable({
   const [sortKey, setSortKey] = useState<SortKey>("usd_value");
   const [removingSymbol, setRemovingSymbol] = useState<string | null>(null);
 
-  const handleBlacklistClick = async (
-    e: React.MouseEvent,
-    symbol: string
-  ) => {
+  const handleBlacklistClick = async (e: React.MouseEvent, symbol: string) => {
     e.stopPropagation();
     const clean = symbol.trim().toUpperCase();
     setRemovingSymbol(clean);
@@ -46,7 +44,6 @@ export default function WallTable({
     }
   };
 
-  // Deduplicate and sort Bid Wall cards
   const sortedWalls = useMemo(() => {
     const map = new Map<string, BidWall>();
     for (const w of walls) {
@@ -60,13 +57,9 @@ export default function WallTable({
 
     const list = Array.from(map.values());
     return list.sort((a, b) => {
-      if (sortKey === "usd_value") {
-        return b.usd_value - a.usd_value;
-      }
+      if (sortKey === "usd_value") return b.usd_value - a.usd_value;
       if (sortKey === "respect_rate") {
-        const rA = a.respect_rate ?? 0.75;
-        const rB = b.respect_rate ?? 0.75;
-        return rB - rA;
+        return (b.respect_rate ?? 0.75) - (a.respect_rate ?? 0.75);
       }
       const timeA = new Date(a.last_seen || a.last_seen_at || 0).getTime();
       const timeB = new Date(b.last_seen || b.last_seen_at || 0).getTime();
@@ -105,14 +98,13 @@ export default function WallTable({
           </div>
         </div>
 
-        {/* Sort Pill Toggle */}
         <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-[#07090E]/90 p-1 text-[11px]">
           <ArrowUpDown className="ml-1.5 mr-1 h-3 w-3 text-slate-400" />
           <button
             onClick={() => setSortKey("usd_value")}
             className={`rounded-lg px-2 py-1 font-semibold transition ${
               sortKey === "usd_value"
-                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                ? "border border-emerald-500/30 bg-emerald-500/20 text-emerald-300"
                 : "text-slate-400 hover:text-white"
             }`}
           >
@@ -122,7 +114,7 @@ export default function WallTable({
             onClick={() => setSortKey("respect_rate")}
             className={`rounded-lg px-2 py-1 font-semibold transition ${
               sortKey === "respect_rate"
-                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                ? "border border-emerald-500/30 bg-emerald-500/20 text-emerald-300"
                 : "text-slate-400 hover:text-white"
             }`}
           >
@@ -133,13 +125,9 @@ export default function WallTable({
 
       {/* Scrollable Telegram-Style Wall Cards List */}
       <div className="max-h-[620px] space-y-3 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-800">
+        {/* Upgrade 5: Sleek Wall Card Skeleton Loader */}
         {isLoading && sortedWalls.length === 0 ? (
-          [...Array(4)].map((_, idx) => (
-            <div
-              key={idx}
-              className="h-28 animate-pulse rounded-2xl border border-white/[0.05] bg-slate-800/50 p-4"
-            />
-          ))
+          <WallCardsSkeleton count={4} />
         ) : sortedWalls.length === 0 ? (
           <div className="py-14 text-center text-xs text-slate-500">
             <Layers className="mx-auto mb-2 h-7 w-7 opacity-40" />
@@ -172,7 +160,6 @@ export default function WallTable({
                       : "border-white/[0.08] bg-white/[0.02] hover:border-cyan-500/40 hover:bg-white/[0.04]"
                   }`}
                 >
-                  {/* Top Row: Symbol, Exchange, Tier Badge & Trash/Ban Button */}
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2.5">
                       <span className="relative flex h-2.5 w-2.5">
@@ -188,7 +175,7 @@ export default function WallTable({
                         />
                       </span>
 
-                      <span className="text-base font-black tracking-tight text-white group-hover:text-cyan-300 transition">
+                      <span className="text-base font-black tracking-tight text-white transition group-hover:text-cyan-300">
                         🐋 {cleanSym}
                       </span>
 
@@ -198,7 +185,6 @@ export default function WallTable({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* Color-Coded Size Badge: Green > $50k, Yellow > $10k */}
                       {isMegaWhale ? (
                         <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.25)]">
                           <Flame className="h-3 w-3 text-emerald-400" /> &gt;$50K WHALE
@@ -213,7 +199,6 @@ export default function WallTable({
                         </span>
                       )}
 
-                      {/* One-Click Blacklist Button */}
                       <button
                         onClick={(e) => handleBlacklistClick(e, cleanSym)}
                         disabled={isBeingRemoved}
@@ -225,7 +210,6 @@ export default function WallTable({
                     </div>
                   </div>
 
-                  {/* Middle Row: Wall Size (USD) & Wall Price (Telegram Alert Layout) */}
                   <div className="mt-3 flex items-baseline justify-between rounded-xl border border-white/[0.06] bg-black/30 px-3.5 py-2.5">
                     <div>
                       <span className="text-[10px] uppercase tracking-wider text-slate-400">
@@ -254,7 +238,6 @@ export default function WallTable({
                     </div>
                   </div>
 
-                  {/* Bottom Row: Subtle Progress Bar for "Respect Rate" + Timestamp */}
                   <div className="mt-3 space-y-1.5">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="flex items-center gap-1 font-medium text-slate-300">

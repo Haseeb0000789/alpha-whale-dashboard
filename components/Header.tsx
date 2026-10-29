@@ -2,7 +2,8 @@
 "use client";
 
 import React from "react";
-import { Activity, RefreshCw, Radio, ShieldAlert, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { Activity, RefreshCw, Radio, ShieldAlert, Sparkles, Settings } from "lucide-react";
 
 interface HeaderProps {
   isPolling: boolean;
@@ -88,6 +89,16 @@ export default function Header({
             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin text-cyan-400" : ""}`} />
             <span>{ lastUpdated ? `Synced ${lastUpdated.toLocaleTimeString()}` : "Refresh" }</span>
           </button>
+
+          {/* NAYA: Bot Control Center Link */}
+          <Link
+            href="/settings"
+            className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-slate-200 transition hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+          >
+            <Settings className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Control Center</span>
+          </Link>
+          
         </div>
       </div>
     </header>
