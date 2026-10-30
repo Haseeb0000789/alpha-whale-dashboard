@@ -1,7 +1,7 @@
 // components/Navbar.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react"; // <--- Suspense Import kiya
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -38,7 +38,8 @@ const NAV_LINKS = [
   },
 ];
 
-export default function Navbar() {
+// 1. INNER COMPONENT (Aapka asli UI yahan hai)
+function NavbarContent() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -227,5 +228,19 @@ export default function Navbar() {
         )}
       </AnimatePresence>
     </header>
+  );
+}
+
+// 2. OUTER COMPONENT (Suspense Wrapper)
+export default function Navbar() {
+  return (
+    <Suspense
+      fallback={
+        // Yeh fallback sirf tab dikhega jab page ka URL check ho raha hoga, taake screen na hile
+        <div className="sticky top-0 z-40 h-[73px] w-full border-b border-slate-800/80 bg-[#07090E]/85 backdrop-blur-xl" />
+      }
+    >
+      <NavbarContent />
+    </Suspense>
   );
 }

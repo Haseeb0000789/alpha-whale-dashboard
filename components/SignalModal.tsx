@@ -1,11 +1,12 @@
 ﻿// components/SignalModal.tsx
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Signal,
+  OHLCCandle, // <--- NAYA IMPORT
   formatCryptoPrice,
   formatPatternName,
   formatRelativeTime,
@@ -44,6 +45,34 @@ export default function SignalModal({
   onBlacklist,
   isBlacklisting = false,
 }: SignalModalProps) {
+  // FIX 2: Real Candles State
+  const [liveCandles, setLiveCandles] = useState<OHLCCandle[] | undefined>(undefined);
+
+  // FIX 2: Fetch Real Data for the Modal
+  useEffect(() => {
+    if (!signal) {
+      setLiveCandles(undefined);
+      return;
+    }
+    let active = true;
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    
+    fetch(`${API_BASE}/api/coin/${encodeURIComponent(signal.symbol.trim().toUpperCase())}`, {
+      cache: "no-store",
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (active && data?.ohlc && data.ohlc.length > 5) {
+          setLiveCandles(data.ohlc);
+        }
+      })
+      .catch(() => {});
+      
+    return () => {
+      active = false;
+    };
+  }, [signal]);
+
   const tradeMetrics = useMemo(() => {
     if (!signal) return null;
     const entryRef = signal.entry_high || signal.breakout_price || signal.entry_low || 0;
@@ -126,7 +155,7 @@ export default function SignalModal({
     <AnimatePresence>
       {signal && tradeMetrics && (
         <>
-          {/* Glassmorphic Backdrop */}
+          {/* Glassmorphic Backdrop (z-[90] overlays Navbar z-40) */}
           <motion.div
             key="modal-backdrop"
             initial={{ opacity: 0 }}
@@ -134,20 +163,18 @@ export default function SignalModal({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             onClick={onClose}
-            className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm"
+            className="fixed inset-0 z-[90] bg-black/75 backdrop-blur-sm"
           />
 
-          {/* Slide-In Right Sidebar Terminal */}
+          {/* Slide-In Right Sidebar Terminal (z-[100] stays above Navbar) */}
           <motion.aside
             key="modal-drawer"
             initial={{ x: "100%", opacity: 0.5 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "100%", opacity: 0 }}
             transition={{ type: "spring", damping: 28, stiffness: 280 }}
-            className="fixed right-0 top-0 z-50 flex h-full w-full max-w-2xl flex-col border-l border-slate-700/50 bg-[#080B12]/95 shadow-[-20px_0_60px_rgba(0,0,0,0.85)] backdrop-blur-2xl"
+            className="fixed right-0 top-0 z-[100] flex h-screen w-full max-w-2xl flex-col border-l border-slate-700/60 bg-[#080B12] shadow-[-20px_0_60px_rgba(0,0,0,0.9)]"
           >
-            <div className="h-1 w-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-purple-500" />
-
             {/* 1. HEADER */}
             <div className="relative flex items-center justify-between border-b border-slate-700/50 bg-slate-800/40 px-6 py-4">
               <div className="space-y-1.5">
@@ -248,7 +275,7 @@ export default function SignalModal({
 
             {/* Scrollable Body */}
             <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5 scrollbar-thin scrollbar-thumb-slate-800">
-              {/* 2. UPGRADE 2: TRADINGVIEW LIGHTWEIGHT CANDLESTICK CHART */}
+              {/* 2. TRADINGVIEW LIGHTWEIGHT CANDLESTICK CHART */}
               <TradingChart
                 symbol={signal.symbol}
                 timeframe={signal.timeframe}
@@ -256,6 +283,7 @@ export default function SignalModal({
                 stopLoss={tradeMetrics.sl}
                 tp1Price={tradeMetrics.tp1}
                 tp2Price={tradeMetrics.tp2}
+                candles={liveCandles} /* <--- YAHAN REAL CANDLES PASS HO RAHI HAIN */
                 height={250}
               />
 
@@ -343,7 +371,7 @@ export default function SignalModal({
                 </div>
               </div>
 
-              {/* 4. UPGRADE 3: ORDER BOOK DEPTH CHART */}
+              {/* 4. ORDER BOOK DEPTH CHART */}
               <DepthChart
                 symbol={signal.symbol}
                 midPrice={tradeMetrics.entryHigh}
