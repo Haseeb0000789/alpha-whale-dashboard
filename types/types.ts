@@ -16,7 +16,7 @@ export interface Signal {
   tp1_price: number;
   tp2_price: number;
   volume_ratio: number;
-  taker_buy_ratio: number; // 0.0 to 1.0 (or 0 to 100)
+  taker_buy_ratio: number;
   smc_bos: boolean;
   smc_ob: boolean;
   smc_retest?: boolean;
@@ -35,7 +35,7 @@ export interface BidWall {
   exchange: string;
   price: number;
   usd_value: number;
-  respect_rate?: number; // 0.0 to 1.0 or 0 to 100 (e.g., 0.75 = 75% respected)
+  respect_rate?: number;
   last_seen?: string;
   last_seen_at?: string;
 }
@@ -49,6 +49,57 @@ export interface SignalStats {
   tp2_rate_pct: number;
   avg_max_gain_pct: number;
   avg_max_drawdown_pct: number;
+}
+
+// Upgrade 2: TradingView Lightweight Chart OHLC interface
+export interface OHLCCandle {
+  time: number; // Unix timestamp in seconds
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+// Upgrade 3: Order Book Depth Chart point interface
+export interface DepthPoint {
+  price: number;
+  priceLabel: string;
+  bidsUsd: number | null;
+  asksUsd: number | null;
+}
+
+// Upgrade 1: Coin Detail Page interfaces
+export interface CoinWallHistoryItem {
+  id: number;
+  exchange: string;
+  price: number;
+  usd_value: number;
+  status: "HELD" | "PULLED" | "BROKEN" | "ACTIVE";
+  respect_rate: number;
+  detected_at: string;
+}
+
+export interface CoinDetailData {
+  symbol: string;
+  current_price: number;
+  change_24h_pct: number;
+  win_rate_pct: number;
+  total_signals: number;
+  active_walls_count: number;
+  respect_rate_pct: number;
+  signals: Signal[];
+  wall_history: CoinWallHistoryItem[];
+  ohlc?: OHLCCandle[];
+  depth?: DepthPoint[];
+}
+
+// Upgrade 4: Cumulative PnL Equity Curve point
+export interface EquityCurvePoint {
+  dateLabel: string;
+  winRate: number;
+  dailyGainPct: number;
+  cumulativePnlPct: number;
+  signalsCount: number;
 }
 
 export type TimeframeFilter = "ALL" | "15m" | "1h" | "4h" | "1d";

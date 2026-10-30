@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { BidWall, formatCryptoPrice, formatRelativeTime } from "@/types/types";
 import { WallCardsSkeleton } from "./Skeletons";
@@ -13,6 +14,7 @@ import {
   Layers,
   CheckCircle2,
   Zap,
+  ArrowUpRight,
 } from "lucide-react";
 
 interface WallTableProps {
@@ -76,29 +78,26 @@ export default function WallTable({
   };
 
   return (
-    <div className="flex flex-col rounded-2xl border border-white/[0.08] bg-gradient-to-b from-slate-900/85 to-[#0B0F17]/95 shadow-2xl backdrop-blur-xl">
-      {/* Header & Sort Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-5 py-4">
+    <div className="flex flex-col rounded-2xl border border-slate-700/50 bg-slate-800/40 shadow-2xl backdrop-blur-xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/50 px-5 py-4">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
             <Shield className="h-4 w-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-white">
-                Live Whale Bid Walls
-              </h2>
+              <h2 className="text-sm font-bold text-white">Live Whale Bid Walls</h2>
               <span className="rounded-full border border-emerald-500/25 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-400">
                 {sortedWalls.length} Live
               </span>
             </div>
             <p className="text-[11px] text-slate-400">
-              Real-time L2 order book support & historical hold rate
+              Click Symbol to open Coin Deep-Dive Terminal
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-[#07090E]/90 p-1 text-[11px]">
+        <div className="flex items-center gap-1 rounded-xl border border-slate-700/50 bg-[#07090E]/90 p-1 text-[11px]">
           <ArrowUpDown className="ml-1.5 mr-1 h-3 w-3 text-slate-400" />
           <button
             onClick={() => setSortKey("usd_value")}
@@ -123,9 +122,7 @@ export default function WallTable({
         </div>
       </div>
 
-      {/* Scrollable Telegram-Style Wall Cards List */}
       <div className="max-h-[620px] space-y-3 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-800">
-        {/* Upgrade 5: Sleek Wall Card Skeleton Loader */}
         {isLoading && sortedWalls.length === 0 ? (
           <WallCardsSkeleton count={4} />
         ) : sortedWalls.length === 0 ? (
@@ -150,14 +147,13 @@ export default function WallTable({
                   initial={{ opacity: 0, scale: 0.96, y: 10 }}
                   animate={{ opacity: isBeingRemoved ? 0.35 : 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, x: 40, scale: 0.92 }}
-                  transition={{ duration: 0.22 }}
                   onClick={() => onSelectSymbol && onSelectSymbol(cleanSym)}
                   className={`group relative cursor-pointer overflow-hidden rounded-2xl border p-4 transition-all ${
                     isMegaWhale
-                      ? "border-emerald-500/40 bg-gradient-to-br from-emerald-500/[0.12] via-slate-900/90 to-[#090D16] shadow-[0_0_25px_rgba(16,185,129,0.12)] hover:border-emerald-400/70"
+                      ? "border-emerald-500/40 bg-gradient-to-br from-emerald-500/[0.12] via-slate-900/90 to-[#090D16] hover:border-emerald-400/70"
                       : isSharkWall
                       ? "border-amber-500/35 bg-gradient-to-br from-amber-500/[0.09] via-slate-900/90 to-[#090D16] hover:border-amber-400/60"
-                      : "border-white/[0.08] bg-white/[0.02] hover:border-cyan-500/40 hover:bg-white/[0.04]"
+                      : "border-slate-700/50 bg-slate-900/40 hover:border-cyan-500/40"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -175,18 +171,24 @@ export default function WallTable({
                         />
                       </span>
 
-                      <span className="text-base font-black tracking-tight text-white transition group-hover:text-cyan-300">
-                        🐋 {cleanSym}
-                      </span>
+                      {/* Upgrade 1: Wrapped Symbol in <Link href={`/coin/${symbol}`}> */}
+                      <Link
+                        href={`/coin/${encodeURIComponent(cleanSym)}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-base font-black tracking-tight text-white transition hover:text-cyan-300 hover:underline"
+                      >
+                        <span>🐋 {cleanSym}</span>
+                        <ArrowUpRight className="h-3.5 w-3.5 text-cyan-400" />
+                      </Link>
 
-                      <span className="rounded-md border border-white/10 bg-black/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-300">
+                      <span className="rounded-md border border-slate-700/50 bg-black/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-300">
                         {formatExchange(wall.exchange)}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2">
                       {isMegaWhale ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.25)]">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-300">
                           <Flame className="h-3 w-3 text-emerald-400" /> &gt;$50K WHALE
                         </span>
                       ) : isSharkWall ? (
@@ -194,7 +196,7 @@ export default function WallTable({
                           <Zap className="h-3 w-3 text-amber-400" /> &gt;$10K WALL
                         </span>
                       ) : (
-                        <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                        <span className="rounded-full border border-slate-700/50 bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-slate-400">
                           Tracked
                         </span>
                       )}
@@ -202,15 +204,14 @@ export default function WallTable({
                       <button
                         onClick={(e) => handleBlacklistClick(e, cleanSym)}
                         disabled={isBeingRemoved}
-                        title={`Blacklist ${cleanSym}`}
-                        className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-1.5 text-rose-400 transition hover:border-rose-500/50 hover:bg-rose-500/25 hover:text-rose-200 disabled:opacity-40"
+                        className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-1.5 text-rose-400 transition hover:bg-rose-500/25"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
 
-                  <div className="mt-3 flex items-baseline justify-between rounded-xl border border-white/[0.06] bg-black/30 px-3.5 py-2.5">
+                  <div className="mt-3 flex items-baseline justify-between rounded-xl border border-slate-700/50 bg-black/30 px-3.5 py-2.5">
                     <div>
                       <span className="text-[10px] uppercase tracking-wider text-slate-400">
                         Bid Wall Size (USD)
@@ -257,13 +258,7 @@ export default function WallTable({
                         initial={{ width: 0 }}
                         animate={{ width: `${Math.min(100, Math.max(10, respectPct))}%` }}
                         transition={{ duration: 0.5, ease: "easeOut" }}
-                        className={`h-full rounded-full ${
-                          respectPct >= 70
-                            ? "bg-gradient-to-r from-emerald-500 to-cyan-400"
-                            : respectPct >= 45
-                            ? "bg-gradient-to-r from-amber-500 to-yellow-400"
-                            : "bg-gradient-to-r from-rose-500 to-orange-500"
-                        }`}
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400"
                       />
                     </div>
                   </div>
