@@ -8,16 +8,14 @@ import React, {
   useMemo,
   useTransition,
 } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import SignalModal from "@/components/SignalModal";
 import { exportToCSV } from "@/components/SignalTable";
 import {
   Signal,
   TimeframeFilter,
   formatCryptoPrice,
   formatPatternName,
-  formatRelativeTime,
 } from "@/types/types";
 import {
   Search,
@@ -28,10 +26,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   Sparkles,
-  Trash2,
   ArrowUpRight,
   Cpu,
-  Ban,
+  ArrowUpDown,
+  Zap,
 } from "lucide-react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -47,145 +45,27 @@ const PATTERN_OPTIONS = [
   { value: "ascending_triangle", label: "Ascending Triangle" },
   { value: "bullish_pennant", label: "Bullish Pennant" },
   { value: "bullish_flag", label: "Bullish Flag" },
+  { value: "descending_trendline", label: "Descending Trendline" },
 ];
 
-const FALLBACK_SIGNALS: Signal[] = [
-  {
-    id: 101,
-    symbol: "PHAROS",
-    structure: "double_bottom",
-    timeframe: "4h",
-    confidence: 96,
-    p1_volume_score: 25,
-    p2_wall_score: 25,
-    p3_structure_score: 36,
-    p4_btc_score: 10,
-    entry_low: 0.632863,
-    entry_high: 0.634166,
-    stop_loss: 0.617849,
-    tp1_price: 0.658641,
-    tp2_price: 0.674957,
-    volume_ratio: 6.4,
-    taker_buy_ratio: 0.78,
-    is_extended: false,
-    detected_at: "2026-10-30T11:38:00.000Z",
-    smc_bos: true,
-    smc_ob: true,
-    smc_retest: true,
-  },
-  {
-    id: 102,
-    symbol: "FHE",
-    structure: "double_bottom",
-    timeframe: "4h",
-    confidence: 84,
-    p1_volume_score: 17,
-    p2_wall_score: 23,
-    p3_structure_score: 34,
-    p4_btc_score: 10,
-    entry_low: 0.0187811,
-    entry_high: 0.0189282,
-    stop_loss: 0.0184644,
-    tp1_price: 0.019624,
-    tp2_price: 0.0200879,
-    volume_ratio: 2.2,
-    taker_buy_ratio: 0.7,
-    is_extended: false,
-    detected_at: "2026-10-30T11:45:00.000Z",
-    smc_bos: true,
-    smc_ob: false,
-  },
-  {
-    id: 103,
-    symbol: "LYN",
-    structure: "double_bottom",
-    timeframe: "4h",
-    confidence: 68,
-    p1_volume_score: 20,
-    p2_wall_score: 0,
-    p3_structure_score: 38,
-    p4_btc_score: 10,
-    entry_low: 0.0154486,
-    entry_high: 0.0156351,
-    stop_loss: 0.0148913,
-    tp1_price: 0.0167509,
-    tp2_price: 0.0174947,
-    volume_ratio: 4.0,
-    taker_buy_ratio: 0.59,
-    is_extended: false,
-    detected_at: "2026-10-30T11:30:00.000Z",
-    smc_bos: true,
-    smc_ob: true,
-  },
-  {
-    id: 104,
-    symbol: "GUA",
-    structure: "cup_and_handle",
-    timeframe: "4h",
-    confidence: 67,
-    p1_volume_score: 19,
-    p2_wall_score: 0,
-    p3_structure_score: 38,
-    p4_btc_score: 10,
-    entry_low: 0.0340532,
-    entry_high: 0.0343622,
-    stop_loss: 0.0326883,
-    tp1_price: 0.0368729,
-    tp2_price: 0.0385467,
-    volume_ratio: 4.5,
-    taker_buy_ratio: 0.59,
-    is_extended: false,
-    detected_at: "2026-10-30T11:20:00.000Z",
-    smc_bos: true,
-    smc_ob: true,
-  },
-  {
-    id: 105,
-    symbol: "RLS",
-    structure: "double_bottom",
-    timeframe: "1d",
-    confidence: 64,
-    p1_volume_score: 18,
-    p2_wall_score: 12,
-    p3_structure_score: 24,
-    p4_btc_score: 10,
-    entry_low: 0.0023143,
-    entry_high: 0.002685,
-    stop_loss: 0.00221,
-    tp1_price: 0.00295,
-    tp2_price: 0.00321,
-    volume_ratio: 2.4,
-    taker_buy_ratio: 0.62,
-    is_extended: true,
-    detected_at: "2026-10-30T11:05:00.000Z",
-    smc_bos: true,
-    smc_ob: false,
-  },
-  {
-    id: 106,
-    symbol: "DRV",
-    structure: "double_bottom",
-    timeframe: "4h",
-    confidence: 72,
-    p1_volume_score: 16,
-    p2_wall_score: 8,
-    p3_structure_score: 38,
-    p4_btc_score: 10,
-    entry_low: 0.384311,
-    entry_high: 0.386596,
-    stop_loss: 0.377376,
-    tp1_price: 0.400426,
-    tp2_price: 0.409647,
-    volume_ratio: 2.3,
-    taker_buy_ratio: 0.62,
-    is_extended: false,
-    detected_at: "2026-10-30T10:50:00.000Z",
-    smc_bos: true,
-    smc_ob: true,
-  },
-];
+type SortMode = "relevance" | "confidence" | "time";
 
-// Circular SVG Score Badge Component
+// Prerender-safe relative time helper using state timestamp (nowMs)
+function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): string {
+  if (!isoDate || nowMs <= 0) return "Just now";
+  const dateMs = new Date(isoDate).getTime();
+  if (isNaN(dateMs)) return "Just now";
+  const diffSeconds = Math.max(0, Math.floor((nowMs - dateMs) / 1000));
+
+  if (diffSeconds < 60) return `${diffSeconds}s ago`;
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ${diffMinutes % 60}m ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+}
+
+// Circular SVG Score Gauge
 function ScoreCircleBadge({ score }: { score: number }) {
   const radius = 20;
   const circumference = 2 * Math.PI * radius;
@@ -196,7 +76,7 @@ function ScoreCircleBadge({ score }: { score: number }) {
     clamped >= 80 ? "#10b981" : clamped >= 68 ? "#06b6d4" : "#f59e0b";
 
   return (
-    <div className="relative flex h-13 w-13 items-center justify-center">
+    <div className="relative flex h-12 w-12 items-center justify-center">
       <svg className="h-12 w-12 -rotate-90 transform" viewBox="0 0 48 48">
         <circle
           cx="24"
@@ -226,61 +106,50 @@ function ScoreCircleBadge({ score }: { score: number }) {
 }
 
 export default function SignalsGridPage() {
+  const router = useRouter();
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [blacklistedSet, setBlacklistedSet] = useState<Set<string>>(new Set());
 
-  // Separate initial load from background polling to eliminate flickering
+  // Fix Next.js Prerender Error: Only update current timestamp inside useEffect / callbacks
+  const [nowMs, setNowMs] = useState<number>(0);
+
   const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isPending, startTransition] = useTransition();
 
-  // Filter & Modal states
+  // Filters & Controls
   const [selectedTf, setSelectedTf] = useState<TimeframeFilter>("ALL");
   const [selectedPattern, setSelectedPattern] = useState<string>("ALL");
   const [minScore, setMinScore] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [sortBy, setSortBy] = useState<"confidence" | "time">("confidence");
-  const [activeSignalModal, setActiveSignalModal] = useState<Signal | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [onlyReady, setOnlyReady] = useState<boolean>(false);
+  const [sortMode, setSortMode] = useState<SortMode>("relevance");
 
-  const fetchSignals = useCallback(
-    async (isManual = false) => {
-      if (isManual) setIsRefreshing(true);
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/signals`, {
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error("API offline");
-        const data = await res.json();
-        const raw: Signal[] = Array.isArray(data) ? data : data.signals || [];
+  const fetchSignals = useCallback(async (isManual = false) => {
+    if (isManual) setIsRefreshing(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/signals`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error("API offline");
+      const data = await res.json();
+      const raw: Signal[] = Array.isArray(data) ? data : data.signals || [];
 
-        // Upgrade 4: Non-blocking React 18 startTransition
-        startTransition(() => {
-          setSignals(
-            raw.filter(
-              (s) => !blacklistedSet.has(s.symbol.trim().toUpperCase())
-            )
-          );
-        });
-      } catch {
-        startTransition(() => {
-          setSignals((prev) =>
-            prev.length > 0
-              ? prev
-              : FALLBACK_SIGNALS.filter(
-                  (s) => !blacklistedSet.has(s.symbol.trim().toUpperCase())
-                )
-          );
-        });
-      } finally {
-        setIsInitialLoading(false);
-        setIsRefreshing(false);
-      }
-    },
-    [blacklistedSet]
-  );
+      startTransition(() => {
+        setNowMs(Date.now());
+        setSignals(raw);
+      });
+    } catch {
+      startTransition(() => {
+        setNowMs(Date.now());
+      });
+    } finally {
+      setIsInitialLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
+    setNowMs(Date.now());
     fetchSignals(false);
     const timer = setInterval(() => {
       fetchSignals(false);
@@ -288,31 +157,12 @@ export default function SignalsGridPage() {
     return () => clearInterval(timer);
   }, [fetchSignals]);
 
-  const handleBlacklist = useCallback(async (symbol: string) => {
-    const cleanSym = symbol.trim().toUpperCase();
-    setBlacklistedSet((prev) => new Set(prev).add(cleanSym));
-    setSignals((prev) =>
-      prev.filter((s) => s.symbol.trim().toUpperCase() !== cleanSym)
-    );
-
-    try {
-      await fetch(`${API_BASE_URL}/api/dashboard/blacklist`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: cleanSym }),
-      });
-    } catch {
-      // Optimistically removed
-    } finally {
-      setToastMessage(`Token Blacklisted: ${cleanSym}`);
-      setTimeout(() => setToastMessage(null), 3500);
-    }
-  }, []);
-
   const filteredSignals = useMemo(() => {
+    if (signals.length === 0) return [];
+
     const list = signals.filter((sig) => {
       const cleanSym = sig.symbol.trim().toUpperCase();
-      if (blacklistedSet.has(cleanSym)) return false;
+      if (onlyReady && sig.is_extended) return false;
 
       const matchesTf =
         selectedTf === "ALL" ||
@@ -330,29 +180,60 @@ export default function SignalsGridPage() {
     });
 
     return [...list].sort((a, b) => {
-      if (sortBy === "confidence") return b.confidence - a.confidence;
-      const tA = a.detected_at ? new Date(a.detected_at).getTime() : 0;
-      const tB = b.detected_at ? new Date(b.detected_at).getTime() : 0;
-      return tB - tA;
+      const timeA = a.detected_at ? new Date(a.detected_at).getTime() : 0;
+      const timeB = b.detected_at ? new Date(b.detected_at).getTime() : 0;
+
+      if (sortMode === "relevance") {
+        const refNow = nowMs > 0 ? nowMs : timeA;
+        const ageHoursA = Math.max(0, (refNow - timeA) / 3600000);
+        const ageHoursB = Math.max(0, (refNow - timeB) / 3600000);
+
+        const freshScoreA = Math.max(0, 45 - ageHoursA * 4.5);
+        const freshScoreB = Math.max(0, 45 - ageHoursB * 4.5);
+
+        const readyBonusA = a.is_extended ? 0 : 25;
+        const readyBonusB = b.is_extended ? 0 : 25;
+
+        const wallBonusA = (a.p2_wall_score ?? 0) > 0 ? 15 : 0;
+        const wallBonusB = (b.p2_wall_score ?? 0) > 0 ? 15 : 0;
+
+        const relA = a.confidence + freshScoreA + readyBonusA + wallBonusA;
+        const relB = b.confidence + freshScoreB + readyBonusB + wallBonusB;
+
+        return relB - relA;
+      }
+
+      if (sortMode === "confidence") {
+        if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+        return timeB - timeA;
+      }
+
+      const bucketA = Math.floor(timeA / 120000);
+      const bucketB = Math.floor(timeB / 120000);
+      if (bucketB !== bucketA) {
+        return bucketB - bucketA;
+      }
+      return b.confidence - a.confidence;
     });
   }, [
     signals,
-    blacklistedSet,
+    nowMs,
     selectedTf,
     selectedPattern,
     minScore,
     searchQuery,
-    sortBy,
+    onlyReady,
+    sortMode,
   ]);
 
   return (
-    <main className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 pb-24">
+    <main className="mx-auto max-w-[1600px] space-y-4 px-4 py-4 sm:px-6 pb-20">
       {/* Top Filter & Control Panel */}
-      <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 sm:p-5 backdrop-blur-xl space-y-4">
+      <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-xl space-y-3.5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
-              <Cpu className="h-5 w-5" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
+              <Cpu className="h-4 w-4" />
             </div>
             <div>
               <div className="flex items-center gap-2.5">
@@ -363,13 +244,13 @@ export default function SignalsGridPage() {
                   {filteredSignals.length} Active
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Tap any card to launch TradingView chart & L2 Depth analysis
+              <p className="text-[11px] text-slate-400">
+                Click any signal card to open its full Deep-Dive Chart & Order Book Terminal
               </p>
             </div>
           </div>
 
-          {/* Search, CSV Export & Timeframe Pills */}
+          {/* Search, CSV Export & Timeframe Buttons */}
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="relative flex-1 sm:flex-initial">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -378,17 +259,17 @@ export default function SignalsGridPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search symbol..."
-                className="w-full sm:w-48 rounded-xl border border-slate-700/60 bg-[#07090E]/90 py-2 pl-9 pr-3 text-xs text-white placeholder-slate-500 focus:border-cyan-500/50 focus:outline-none"
+                className="w-full sm:w-44 rounded-xl border border-slate-700/60 bg-[#07090E]/90 py-1.5 pl-9 pr-3 text-xs text-white placeholder-slate-500 focus:border-cyan-500/50 focus:outline-none"
               />
             </div>
 
             <button
               onClick={() => exportToCSV(filteredSignals)}
               disabled={filteredSignals.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-40"
             >
               <Download className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Download CSV</span>
+              <span className="hidden sm:inline">CSV</span>
             </button>
 
             <div className="flex items-center gap-1 rounded-xl border border-slate-700/60 bg-[#07090E]/90 p-1">
@@ -410,9 +291,74 @@ export default function SignalsGridPage() {
           </div>
         </div>
 
-        {/* Secondary Filter Bar: Pattern Dropdown + Min Score Slider + Sort Toggle */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-800/80 pt-3.5 text-xs">
+        {/* Secondary Bar: Sort on LEFT, Pattern + Min Score + Ready Only on RIGHT */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-800/80 pt-3 text-xs">
+          {/* LEFT SIDE: Sort Options */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 flex items-center gap-1 text-slate-400">
+              <ArrowUpDown className="h-3.5 w-3.5 text-cyan-400" /> Sort:
+            </span>
+            <button
+              onClick={() => setSortMode("relevance")}
+              className={`rounded-lg px-2.5 py-1 font-bold transition ${
+                sortMode === "relevance"
+                  ? "border border-emerald-500/40 bg-emerald-500/20 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              🔥 Most Relevant
+            </button>
+            <button
+              onClick={() => setSortMode("confidence")}
+              className={`rounded-lg px-2.5 py-1 font-semibold transition ${
+                sortMode === "confidence"
+                  ? "border border-cyan-500/30 bg-cyan-500/20 text-cyan-300"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              Highest Score
+            </button>
+            <button
+              onClick={() => setSortMode("time")}
+              className={`rounded-lg px-2.5 py-1 font-semibold transition ${
+                sortMode === "time"
+                  ? "border border-cyan-500/30 bg-cyan-500/20 text-cyan-300"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              Newest First
+            </button>
+          </div>
+
+          {/* RIGHT SIDE: Ready Only + Min Score Slider + Pattern Dropdown */}
           <div className="flex flex-wrap items-center gap-4">
+            <button
+              onClick={() => setOnlyReady(!onlyReady)}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 font-semibold transition ${
+                onlyReady
+                  ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]"
+                  : "border-slate-700/60 bg-white/[0.03] text-slate-400 hover:text-white"
+              }`}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Ready Only</span>
+            </button>
+
+            <div className="flex items-center gap-2.5">
+              <span className="text-slate-400">Min Score:</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+                className="h-1.5 w-24 sm:w-28 cursor-pointer appearance-none rounded-lg bg-slate-800 accent-cyan-400"
+              />
+              <span className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 font-mono text-[11px] font-bold text-cyan-300">
+                {minScore}+
+              </span>
+            </div>
+
             <div className="flex items-center gap-2">
               <SlidersHorizontal className="h-3.5 w-3.5 text-cyan-400" />
               <span className="text-slate-400">Pattern:</span>
@@ -428,57 +374,18 @@ export default function SignalsGridPage() {
                 ))}
               </select>
             </div>
-
-            <div className="flex items-center gap-2.5">
-              <span className="text-slate-400">Min Score:</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={minScore}
-                onChange={(e) => setMinScore(Number(e.target.value))}
-                className="h-1.5 w-28 sm:w-36 cursor-pointer appearance-none rounded-lg bg-slate-800 accent-cyan-400"
-              />
-              <span className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 font-mono text-[11px] font-bold text-cyan-300">
-                {minScore}+
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400">Sort:</span>
-            <button
-              onClick={() => setSortBy("confidence")}
-              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-                sortBy === "confidence"
-                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Highest Score
-            </button>
-            <button
-              onClick={() => setSortBy("time")}
-              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-                sortBy === "time"
-                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Newest First
-            </button>
           </div>
         </div>
       </div>
 
-      {/* Upgrade 3 & 4: Responsive 3-Column Premium Card Grid (No Flickering / No Layout Shift) */}
+      {/* 3-Column Responsive Cards Grid */}
       <div className="min-h-[520px]">
         {isInitialLoading && signals.length === 0 ? (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {[1, 2, 3, 4, 5, 6].map((n) => (
               <div
                 key={n}
-                className="h-64 animate-pulse rounded-2xl border border-slate-800/80 bg-slate-900/50 p-5"
+                className="h-60 animate-pulse rounded-2xl border border-slate-800/80 bg-slate-900/50 p-5"
               />
             ))}
           </div>
@@ -493,6 +400,7 @@ export default function SignalsGridPage() {
                 setSelectedPattern("ALL");
                 setMinScore(0);
                 setSearchQuery("");
+                setOnlyReady(false);
               }}
               className="mt-3 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-bold text-cyan-300"
             >
@@ -500,15 +408,20 @@ export default function SignalsGridPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             <AnimatePresence mode="popLayout" initial={false}>
               {filteredSignals.map((sig) => {
                 const cleanSym = sig.symbol.trim().toUpperCase();
                 const stableKey = sig.id
                   ? `sig-${sig.id}`
-                  : `${cleanSym}-${sig.timeframe}`;
+                  : `${cleanSym}-${sig.timeframe}-${sig.detected_at || ""}`;
                 const entryVal =
                   sig.entry_high || sig.breakout_price || sig.entry_low;
+
+                const isFresh =
+                  nowMs > 0 &&
+                  Boolean(sig.detected_at) &&
+                  nowMs - new Date(sig.detected_at!).getTime() < 3600000;
 
                 return (
                   <motion.div
@@ -517,29 +430,37 @@ export default function SignalsGridPage() {
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.18 }}
-                    onClick={() => setActiveSignalModal(sig)}
-                    className="group relative flex cursor-pointer flex-col justify-between rounded-2xl border border-slate-800/90 bg-gradient-to-b from-slate-900/90 to-[#0A0E17] p-5 shadow-lg backdrop-blur-xl transition-all duration-200 hover:-translate-y-1 hover:scale-[1.01] hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.18)]"
+                    onClick={() =>
+                      router.push(`/coin/${encodeURIComponent(cleanSym)}`)
+                    }
+                    className={`group relative flex cursor-pointer flex-col justify-between rounded-2xl border p-5 shadow-lg backdrop-blur-xl transition-all duration-200 hover:-translate-y-1 hover:scale-[1.01] ${
+                      !sig.is_extended && isFresh
+                        ? "border-emerald-500/40 bg-gradient-to-b from-emerald-500/[0.08] via-slate-900/90 to-[#0A0E17] hover:border-emerald-400/70 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]"
+                        : "border-slate-800/90 bg-gradient-to-b from-slate-900/90 to-[#0A0E17] hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.18)]"
+                    }`}
                   >
-                    {/* Card Top: Symbol + Timeframe (Left) & 4-Pillar Score Ring (Right) */}
+                    {/* Card Top: Symbol + Timeframe + Score Gauge */}
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <Link
-                            href={`/coin/${encodeURIComponent(cleanSym)}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 text-xl font-black tracking-tight text-white transition hover:text-cyan-300"
-                          >
+                          <span className="inline-flex items-center gap-1 text-xl font-black tracking-tight text-white transition group-hover:text-cyan-300">
                             <span>{cleanSym}</span>
-                            <ArrowUpRight className="h-4 w-4 text-cyan-400 opacity-80" />
-                          </Link>
+                            <ArrowUpRight className="h-4 w-4 text-cyan-400 opacity-80 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                          </span>
 
                           <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/15 px-2 py-0.5 font-mono text-xs font-bold text-cyan-300">
                             {sig.timeframe}
                           </span>
+
+                          {isFresh && !sig.is_extended && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 animate-pulse">
+                              <Zap className="h-2.5 w-2.5" /> Fresh
+                            </span>
+                          )}
                         </div>
 
                         <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-                          <span>{formatRelativeTime(sig.detected_at)}</span>
+                          <span>{formatSafeRelativeTime(sig.detected_at, nowMs)}</span>
                           <span>•</span>
                           {sig.is_extended ? (
                             <span className="inline-flex items-center gap-1 font-semibold text-amber-300">
@@ -555,25 +476,11 @@ export default function SignalsGridPage() {
                         </div>
                       </div>
 
-                      {/* Top Right: Circular 4-Pillar Score + Trash Button */}
-                      <div className="flex items-center gap-2">
-                        <ScoreCircleBadge score={sig.confidence} />
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleBlacklist(cleanSym);
-                          }}
-                          title={`Blacklist ${cleanSym}`}
-                          className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-2 text-rose-400 transition hover:border-rose-500/50 hover:bg-rose-500/25 hover:text-rose-200"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
+                      <ScoreCircleBadge score={sig.confidence} />
                     </div>
 
-                    {/* Card Middle: Pattern Name + SMC Badges (BoS, OB, Wall) */}
-                    <div className="my-4 space-y-2.5 border-y border-white/[0.06] py-3.5">
+                    {/* Card Middle: Pattern Structure + SMC + Volume Flow Badges */}
+                    <div className="my-3.5 space-y-2.5 border-y border-white/[0.06] py-3">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
                           Structure
@@ -600,7 +507,7 @@ export default function SignalsGridPage() {
                           </span>
                         )}
 
-                        {sig.p2_wall_score > 0 && (
+                        {(sig.p2_wall_score ?? 0) > 0 && (
                           <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
                             🧱 L2 Bid Wall
                           </span>
@@ -608,7 +515,7 @@ export default function SignalsGridPage() {
                       </div>
                     </div>
 
-                    {/* Card Bottom Grid (3 Columns): Entry Zone, Stop Loss (Red), TP1 (Green) */}
+                    {/* Card Bottom Grid: Entry Zone, Stop Loss, TP1 */}
                     <div className="grid grid-cols-3 gap-2">
                       <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-2.5 text-center">
                         <span className="block text-[10px] font-semibold uppercase text-cyan-300/80">
@@ -645,13 +552,6 @@ export default function SignalsGridPage() {
         )}
       </div>
 
-      {/* Deep-Dive Modal Drawer */}
-      <SignalModal
-        signal={activeSignalModal}
-        onClose={() => setActiveSignalModal(null)}
-        onBlacklist={handleBlacklist}
-      />
-
       {/* Mobile Floating Refresh Button */}
       <button
         onClick={() => fetchSignals(true)}
@@ -662,22 +562,6 @@ export default function SignalsGridPage() {
           className={`h-5 w-5 ${isRefreshing || isPending ? "animate-spin" : ""}`}
         />
       </button>
-
-      {/* Blacklist Toast */}
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div
-            key="sig-toast"
-            initial={{ opacity: 0, y: 25 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2.5 rounded-2xl border border-rose-500/40 bg-[#0B0F19]/95 px-4 py-3 text-xs font-bold text-rose-300 shadow-2xl backdrop-blur-xl"
-          >
-            <Ban className="h-4 w-4 text-rose-400" />
-            <span>{toastMessage}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </main>
   );
 }

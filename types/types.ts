@@ -29,26 +29,61 @@ export interface Signal {
   wall_respect_rate?: number | null;
 }
 
-export interface BidWall {
-  id?: number;
-  symbol: string;
+export interface ExchangeWallItem {
   exchange: string;
   price: number;
   usd_value: number;
+  distance_pct: number;
+}
+
+export interface BidWall {
+  id?: number;
+  symbol: string;
+  mid_price?: number;
+  exchange: string;
+  price: number;
+  usd_value: number;
+  distance_pct?: number;
+  entry_score?: number;
+  relevance_score?: number;
   respect_rate?: number;
+  scans_seen?: number;
+  step_up_count?: number;
+  is_live_watch?: boolean;
+  positives?: string[];
+  warnings?: string[];
+  exchange_walls?: ExchangeWallItem[];
   last_seen?: string;
   last_seen_at?: string;
 }
 
+// NAYA: Stats breakdown interfaces (Telegram /stats mapping)
+export interface PatternStatItem {
+  structure: string;
+  count: number;
+  avg_confidence: number;
+}
+
+export interface TimeframeStatItem {
+  timeframe: string;
+  count: number;
+}
+
+// UPDATED: SignalStats interface
 export interface SignalStats {
   period_days?: number;
   total_signals: number;
   finalized?: number;
   win_rate_pct: number;
+  wall_backed_win_rate_pct?: number;
   tp1_rate_pct: number;
   tp2_rate_pct: number;
+  breakeven_rate_pct?: number;
+  sl_rate_pct?: number;
   avg_max_gain_pct: number;
   avg_max_drawdown_pct: number;
+  by_structure?: PatternStatItem[];
+  by_timeframe?: TimeframeStatItem[];
 }
 
 // Upgrade 2: TradingView Lightweight Chart OHLC interface
