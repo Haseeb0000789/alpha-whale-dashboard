@@ -12,29 +12,59 @@ import React, {
 } from "react";
 import { Signal, SignalStats, BidWall } from "@/types/types";
 
+export interface BotSettings {
+  min_score: number;
+  min_wall_usd: number;
+  proximity_pct: number;
+  enable_dead_cat: boolean;
+  enable_smc: boolean;
+  enable_extension_penalty: boolean;
+  enable_audio: boolean;
+  cooldown_minutes: number;
+  max_alerts_per_cycle: number;
+}
+
+export const DEFAULT_SETTINGS: BotSettings = {
+  min_score: 65,
+  min_wall_usd: 5000,
+  proximity_pct: 1.5,
+  enable_dead_cat: true,
+  enable_smc: true,
+  enable_extension_penalty: true,
+  enable_audio: true,
+  cooldown_minutes: 30,
+  max_alerts_per_cycle: 5,
+};
+
 interface DashboardSocketState {
   signals: Signal[];
   stats: SignalStats | null;
   walls: BidWall[];
+  settings: BotSettings;
   isConnected: boolean;
   isInitialLoading: boolean;
   lastUpdated: string | null;
   triggerRefresh: () => void;
+  saveBotSettings: (newSettings: BotSettings) => Promise<boolean>;
 }
 
 const DashboardSocketContext = createContext<DashboardSocketState>({
   signals: [],
   stats: null,
   walls: [],
+  settings: DEFAULT_SETTINGS,
   isConnected: false,
   isInitialLoading: true,
   lastUpdated: null,
   triggerRefresh: () => {},
+  saveBotSettings: async () => false,
 });
 
 export const useDashboardSocket = () => useContext(DashboardSocketContext);
 
-function resolveApiBase(): string {
+const LOCAL_STORAGE_SETTINGS_KEY = "alpha_whale_bot_settings_v5";
+
+export function resolveApiBase(): string {
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL;
   }
@@ -57,6 +87,7 @@ export function DashboardSocketProvider({
   const [signals, setSignals] = useState<Signal[]>([]);
   const [stats, setStats] = useState<SignalStats | null>(null);
   const [walls, setWalls] = useState<BidWall[]>([]);
+  const [settings, setSettings] = useState<BotSettings>(DEFAULT_SETTINGS);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -70,7 +101,6 @@ export function DashboardSocketProvider({
   const prevSignalsCountRef = useRef(0);
 
   useEffect(() => {
-    // Jab user pehli dafa screen par click/touch kare, toh audio unlock ho jaye
     const unlockAudio = () => {
       if (!audioCtxRef.current) {
         const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -113,14 +143,41 @@ export function DashboardSocketProvider({
   }, []);
   // ------------------------------------------------
 
+  // 1. Load cached settings from localStorage immediately on client mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setSettings((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, []);
+
+  // 2. Fetch initial HTTP snapshot + saved backend settings
   const fetchInitialHttpSnapshot = useCallback(async () => {
     const apiBase = resolveApiBase();
     try {
-      const [sigRes, statsRes, wallsRes] = await Promise.all([
+      const [sigRes, statsRes, wallsRes, setRes] = await Promise.all([
         fetch(`${apiBase}/api/signals`, { cache: "no-store" }),
         fetch(`${apiBase}/api/signals/stats`, { cache: "no-store" }),
         fetch(`${apiBase}/api/walls/active`, { cache: "no-store" }),
+        fetch(`${apiBase}/api/settings`, { cache: "no-store" }),
       ]);
+
+      if (setRes.ok) {
+        const setJson = await setRes.json();
+        setSettings((prev) => {
+          const merged = { ...prev, ...setJson };
+          try {
+            localStorage.setItem(LOCAL_STORAGE_SETTINGS_KEY, JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+
       if (!sigRes.ok || !statsRes.ok || !wallsRes.ok) return;
 
       const [sigData, statsData, wallsData] = await Promise.all([
@@ -165,7 +222,6 @@ export function DashboardSocketProvider({
             return;
           }
 
-          // Agar snapshot aaye
           if (payload.type === "snapshot") {
             if (Array.isArray(payload.signals)) {
               // Check karein ke kya naya signal aaya hai (Length compare karke)
@@ -179,6 +235,21 @@ export function DashboardSocketProvider({
               if (Array.isArray(payload.signals)) setSignals(payload.signals);
               if (payload.stats) setStats(payload.stats);
               if (Array.isArray(payload.walls)) setWalls(payload.walls);
+              
+              // Update settings if sent via WebSocket
+              if (payload.settings) {
+                setSettings((prev) => {
+                  const merged = { ...prev, ...payload.settings };
+                  try {
+                    localStorage.setItem(
+                      LOCAL_STORAGE_SETTINGS_KEY,
+                      JSON.stringify(merged)
+                    );
+                  } catch {}
+                  return merged;
+                });
+              }
+
               if (payload.timestamp) setLastUpdated(payload.timestamp);
               setIsInitialLoading(false);
             });
@@ -228,16 +299,56 @@ export function DashboardSocketProvider({
     }
   }, [fetchInitialHttpSnapshot]);
 
+  // 3. Instant Optimistic Save + Backend Persistence
+  const saveBotSettings = useCallback(
+    async (newSettings: BotSettings): Promise<boolean> => {
+      // Update Context & localStorage in 0ms so UI NEVER reverts to 55!
+      setSettings(newSettings);
+      try {
+        localStorage.setItem(
+          LOCAL_STORAGE_SETTINGS_KEY,
+          JSON.stringify(newSettings)
+        );
+      } catch {}
+
+      const apiBase = resolveApiBase();
+      try {
+        const res = await fetch(`${apiBase}/api/settings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newSettings),
+        });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data?.settings) {
+          setSettings(data.settings);
+          try {
+            localStorage.setItem(
+              LOCAL_STORAGE_SETTINGS_KEY,
+              JSON.stringify(data.settings)
+            );
+          } catch {}
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    []
+  );
+
   return (
     <DashboardSocketContext.Provider
       value={{
         signals,
         stats,
         walls,
+        settings,
         isConnected,
         isInitialLoading,
         lastUpdated,
         triggerRefresh,
+        saveBotSettings,
       }}
     >
       {children}

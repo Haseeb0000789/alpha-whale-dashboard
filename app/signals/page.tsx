@@ -28,6 +28,9 @@ import {
 
 const TIMEFRAMES: TimeframeFilter[] = ["ALL", "15m", "1h", "4h", "1d"];
 
+// NEW: Outcome filter type (was referenced but never defined)
+type OutcomeFilter = "ALL" | "PENDING" | "TP_HIT" | "SL_HIT";
+
 const PATTERN_OPTIONS = [
   { value: "ALL", label: "All Patterns" },
   { value: "double_bottom", label: "Double Bottom" },
@@ -87,15 +90,24 @@ function ScoreCircleBadge({ score }: { score: number }) {
 
 export default function SignalsGridPage() {
   const router = useRouter();
-  const { signals, isInitialLoading, triggerRefresh } = useDashboardSocket();
+  const { signals, settings, isInitialLoading, triggerRefresh } = useDashboardSocket();
   const [nowMs, setNowMs] = useState<number>(0);
 
   const [selectedTf, setSelectedTf] = useState<TimeframeFilter>("ALL");
   const [selectedPattern, setSelectedPattern] = useState<string>("ALL");
-  const [minScore, setMinScore] = useState<number>(0);
+  const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("ALL");
+  // Initialize Min Score directly from Control Center settings (e.g., 65)!
+  const [minScore, setMinScore] = useState<number>(settings?.min_score ?? 65);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [onlyReady, setOnlyReady] = useState<boolean>(false);
   const [sortMode, setSortMode] = useState<SortMode>("relevance");
+
+  // Keep slider synced whenever Control Center min_score is updated
+  useEffect(() => {
+    if (settings?.min_score !== undefined) {
+      setMinScore(settings.min_score);
+    }
+  }, [settings?.min_score]);
 
   useEffect(() => {
     setNowMs(Date.now());
@@ -114,13 +126,26 @@ export default function SignalsGridPage() {
       const matchesPattern =
         selectedPattern === "ALL" ||
         sig.structure.toLowerCase() === selectedPattern.toLowerCase();
+
+      // NEW: outcome filter (falls back to PENDING if backend doesn't emit the field yet)
+      const signalOutcome =
+        (sig as any).outcome ?? (sig as any).status ?? "PENDING";
+      const matchesOutcome =
+        outcomeFilter === "ALL" || signalOutcome === outcomeFilter;
+
       const matchesScore = sig.confidence >= minScore;
       const matchesSearch =
         !searchQuery.trim() ||
         cleanSym.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
         sig.structure.toLowerCase().includes(searchQuery.trim().toLowerCase());
 
-      return matchesTf && matchesPattern && matchesScore && matchesSearch;
+      return (
+        matchesTf &&
+        matchesPattern &&
+        matchesOutcome &&
+        matchesScore &&
+        matchesSearch
+      );
     });
 
     return [...list].sort((a, b) => {
@@ -162,6 +187,7 @@ export default function SignalsGridPage() {
     nowMs,
     selectedTf,
     selectedPattern,
+    outcomeFilter,
     minScore,
     searchQuery,
     onlyReady,
