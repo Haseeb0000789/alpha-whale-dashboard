@@ -1,5 +1,12 @@
 // types/types.ts
 
+export type SignalOutcomeStatus =
+  | "TP2_HIT"
+  | "TP1_HIT"
+  | "BREAKEVEN"
+  | "SL_HIT"
+  | "IN_PLAY";
+
 export interface Signal {
   id?: number;
   symbol: string;
@@ -27,6 +34,16 @@ export interface Signal {
   wall_price?: number | null;
   wall_usd?: number | null;
   wall_respect_rate?: number | null;
+  
+  // Live Outcome Tracking Fields
+  outcome_status?: SignalOutcomeStatus;
+  outcome_finalized?: boolean;
+  hit_tp1?: boolean;
+  hit_tp2?: boolean;
+  breakeven_exit?: boolean;
+  hit_sl?: boolean;
+  max_gain_pct?: number;
+  max_drawdown_pct?: number;
 }
 
 export interface ExchangeWallItem {
