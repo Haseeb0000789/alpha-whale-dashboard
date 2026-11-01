@@ -65,7 +65,54 @@ export function DashboardSocketProvider({
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [, startTransition] = useTransition();
 
-  // Instant HTTP fallback if WebSocket is still handshaking
+  // --- AUDIO ALARM SETUP (Safari & Mobile Fix) ---
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const prevSignalsCountRef = useRef(0);
+
+  useEffect(() => {
+    // Jab user pehli dafa screen par click/touch kare, toh audio unlock ho jaye
+    const unlockAudio = () => {
+      if (!audioCtxRef.current) {
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContext) {
+          audioCtxRef.current = new AudioContext();
+        }
+      }
+      if (audioCtxRef.current?.state === "suspended") {
+        audioCtxRef.current.resume();
+      }
+    };
+
+    window.addEventListener("click", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio);
+
+    return () => {
+      window.removeEventListener("click", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+    };
+  }, []);
+
+  const playAlarm = useCallback(() => {
+    if (audioCtxRef.current) {
+      const ctx = audioCtxRef.current;
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime); // 880Hz beep
+      
+      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.3);
+    }
+  }, []);
+  // ------------------------------------------------
+
   const fetchInitialHttpSnapshot = useCallback(async () => {
     const apiBase = resolveApiBase();
     try {
@@ -83,7 +130,9 @@ export function DashboardSocketProvider({
       ]);
 
       startTransition(() => {
-        setSignals(Array.isArray(sigData) ? sigData : sigData.signals || []);
+        const parsedSignals = Array.isArray(sigData) ? sigData : sigData.signals || [];
+        prevSignalsCountRef.current = parsedSignals.length;
+        setSignals(parsedSignals);
         setStats(statsData);
         setWalls(Array.isArray(wallsData) ? wallsData : wallsData.walls || []);
         setIsInitialLoading(false);
@@ -108,7 +157,24 @@ export function DashboardSocketProvider({
       ws.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
+          
+          // Agar explicit NEW_SIGNAL event aaye
+          if (payload.type === "NEW_SIGNAL") {
+            playAlarm();
+            setSignals((prev) => [payload.data, ...prev]);
+            return;
+          }
+
+          // Agar snapshot aaye
           if (payload.type === "snapshot") {
+            if (Array.isArray(payload.signals)) {
+              // Check karein ke kya naya signal aaya hai (Length compare karke)
+              if (prevSignalsCountRef.current > 0 && payload.signals.length > prevSignalsCountRef.current) {
+                playAlarm();
+              }
+              prevSignalsCountRef.current = payload.signals.length;
+            }
+
             startTransition(() => {
               if (Array.isArray(payload.signals)) setSignals(payload.signals);
               if (payload.stats) setStats(payload.stats);
@@ -138,7 +204,7 @@ export function DashboardSocketProvider({
         connectWebSocket();
       }, 3000);
     }
-  }, []);
+  }, [playAlarm]);
 
   useEffect(() => {
     fetchInitialHttpSnapshot();
