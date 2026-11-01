@@ -1,10 +1,17 @@
 // app/coin/[symbol]/page.tsx
 "use client";
 
-import React, { Suspense, useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  Suspense,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { useDashboardSocket } from "@/context/DashboardSocketContext";
 import {
   CoinDetailData,
   formatCryptoPrice,
@@ -25,10 +32,20 @@ import {
   Sparkles,
 } from "lucide-react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+function resolveApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined") {
+    return `http://${window.location.hostname}:8000`;
+  }
+  return "http://localhost:8000";
+}
 
-// Prerender-safe relative time helper
-function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): string {
+function formatSafeRelativeTime(
+  isoDate: string | undefined,
+  nowMs: number
+): string {
   if (!isoDate || nowMs <= 0) return "Just now";
   const dateMs = new Date(isoDate).getTime();
   if (isNaN(dateMs)) return "Just now";
@@ -40,65 +57,6 @@ function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): str
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) return `${diffHours}h ${diffMinutes % 60}m ago`;
   return `${Math.floor(diffHours / 24)}d ago`;
-}
-
-function buildFallbackCoinDetail(symbol: string): CoinDetailData {
-  const sym = symbol.toUpperCase();
-  const seedPrice =
-    sym === "PHAROS"
-      ? 0.634166
-      : sym === "DOS"
-      ? 0.20625
-      : sym === "GRASS"
-      ? 0.6952
-      : sym === "FHE"
-      ? 0.0189282
-      : 0.04825;
-
-  return {
-    symbol: sym,
-    current_price: seedPrice,
-    change_24h_pct: -4.07,
-    win_rate_pct: 78.5,
-    total_signals: 7,
-    active_walls_count: 3,
-    respect_rate_pct: 82,
-    signals: [
-      {
-        id: 1,
-        symbol: sym,
-        structure: "bullish_flag",
-        timeframe: "1h",
-        confidence: 66,
-        p1_volume_score: 11.4,
-        p2_wall_score: 23,
-        p3_structure_score: 22,
-        p4_btc_score: 10,
-        entry_low: Number((seedPrice * 0.995).toPrecision(6)),
-        entry_high: Number((seedPrice * 1.007).toPrecision(6)),
-        stop_loss: Number((seedPrice * 0.984).toPrecision(6)),
-        tp1_price: Number((seedPrice * 1.042).toPrecision(6)),
-        tp2_price: Number((seedPrice * 1.066).toPrecision(6)),
-        volume_ratio: 2.0,
-        taker_buy_ratio: 0.68,
-        smc_bos: true,
-        smc_ob: false,
-        is_extended: false,
-        detected_at: "2026-10-31T10:20:00.000Z",
-      },
-    ],
-    wall_history: [
-      {
-        id: 501,
-        exchange: "binance_alpha",
-        price: Number((seedPrice * 0.991).toPrecision(6)),
-        usd_value: 20702,
-        status: "ACTIVE",
-        respect_rate: 75,
-        detected_at: "2026-10-31T10:50:00.000Z",
-      },
-    ],
-  };
 }
 
 function CoinDetailSkeleton() {
@@ -119,106 +77,126 @@ function CoinDetailContent() {
     : params?.symbol || "DOS";
   const symbol = decodeURIComponent(rawSymbol).trim().toUpperCase();
 
-  const [coinData, setCoinData] = useState<CoinDetailData | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // 1. Grab already-loaded WebSocket data in 0ms!
+  const { signals: wsSignals, walls: wsWalls } = useDashboardSocket();
+
+  const [apiCoinData, setApiCoinData] = useState<CoinDetailData | null>(null);
   const [activeTab, setActiveTab] = useState<"signals" | "walls">("signals");
   const [nowMs, setNowMs] = useState<number>(0);
 
-  const fetchCoinDetails = useCallback(async () => {
-    setIsLoading(true);
+  // 2. Build an INSTANT (0ms) Coin Profile from WebSocket RAM so the user NEVER waits!
+  const instantSocketData: CoinDetailData | null = useMemo(() => {
+    const coinSignals = wsSignals.filter(
+      (s) => s.symbol?.trim().toUpperCase() === symbol
+    );
+    const coinWalls = wsWalls.filter(
+      (w) => w.symbol?.trim().toUpperCase() === symbol
+    );
+
+    if (coinSignals.length === 0 && coinWalls.length === 0) {
+      return null;
+    }
+
+    const latestSig = coinSignals[0];
+    const primaryWall = coinWalls[0];
+
+    const realPrice =
+      primaryWall?.mid_price ||
+      latestSig?.breakout_price ||
+      latestSig?.entry_high ||
+      primaryWall?.price ||
+      0.1;
+
+    const rawRespect =
+      primaryWall?.respect_rate ?? latestSig?.wall_respect_rate ?? 0.75;
+    const respectPct =
+      rawRespect <= 1 ? Math.round(rawRespect * 100) : Math.round(rawRespect);
+
+    const flatWalls = coinWalls.flatMap((w, idx) => {
+      if (w.exchange_walls && w.exchange_walls.length > 0) {
+        return w.exchange_walls.map((ew, subIdx) => ({
+          id: idx * 10 + subIdx + 1,
+          exchange: ew.exchange,
+          price: Number(ew.price),
+          usd_value: Number(ew.usd_value),
+          status: "ACTIVE" as const,
+          respect_rate: respectPct,
+          detected_at: w.last_seen || new Date().toISOString(),
+        }));
+      }
+      return [
+        {
+          id: idx + 1,
+          exchange: w.exchange || "binance_alpha",
+          price: Number(w.price),
+          usd_value: Number(w.usd_value),
+          status: "ACTIVE" as const,
+          respect_rate: respectPct,
+          detected_at: w.last_seen || new Date().toISOString(),
+        },
+      ];
+    });
+
+    return {
+      symbol,
+      current_price: Number(realPrice),
+      change_24h_pct: 4.2,
+      win_rate_pct: respectPct,
+      total_signals: coinSignals.length,
+      active_walls_count: flatWalls.length,
+      respect_rate_pct: respectPct,
+      signals: coinSignals,
+      wall_history: flatWalls,
+    };
+  }, [wsSignals, wsWalls, symbol]);
+
+  // 3. Fetch OHLC candles & full 24h DB history in the background without blocking UI
+  const fetchBackgroundCoinDetails = useCallback(async () => {
+    const apiBase = resolveApiBase();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     try {
       const res = await fetch(
-        `${API_BASE_URL}/api/coin/${encodeURIComponent(symbol)}`,
+        `${apiBase}/api/coin/${encodeURIComponent(symbol)}`,
         {
           cache: "no-store",
+          signal: controller.signal,
         }
       );
+      clearTimeout(timeoutId);
       if (res.ok) {
         const data: CoinDetailData = await res.json();
-        setCoinData(data);
+        setApiCoinData(data);
         setNowMs(Date.now());
-        return;
       }
-
-      const [sigRes, wallRes] = await Promise.all([
-        fetch(
-          `${API_BASE_URL}/api/signals?symbol=${encodeURIComponent(
-            symbol
-          )}&hours=168`,
-          { cache: "no-store" }
-        ),
-        fetch(`${API_BASE_URL}/api/walls/active`, { cache: "no-store" }),
-      ]);
-
-      const sigList = sigRes.ok ? await sigRes.json() : [];
-      const wallList = wallRes.ok ? await wallRes.json() : [];
-
-      const coinSignals = (Array.isArray(sigList) ? sigList : []).filter(
-        (s) => s.symbol?.trim().toUpperCase() === symbol
-      );
-      const coinWalls = (Array.isArray(wallList) ? wallList : []).filter(
-        (w) => w.symbol?.trim().toUpperCase() === symbol
-      );
-
-      if (coinSignals.length > 0 || coinWalls.length > 0) {
-        const latestSig = coinSignals[0];
-        const realPrice =
-          latestSig?.breakout_price ||
-          latestSig?.entry_high ||
-          coinWalls[0]?.price ||
-          0.20625;
-
-        const avgRespect =
-          coinWalls.length > 0
-            ? Math.round(
-                (coinWalls.reduce(
-                  (acc, w) => acc + (w.respect_rate ?? 0.75),
-                  0
-                ) /
-                  coinWalls.length) *
-                  100
-              )
-            : latestSig?.wall_respect_rate
-            ? Math.round(latestSig.wall_respect_rate * 100)
-            : 75;
-
-        setCoinData({
-          symbol,
-          current_price: Number(realPrice),
-          change_24h_pct: latestSig?.extension_pct || 4.2,
-          win_rate_pct: avgRespect,
-          total_signals: coinSignals.length,
-          active_walls_count: coinWalls.length,
-          respect_rate_pct: avgRespect,
-          signals: coinSignals,
-          wall_history: coinWalls.map((w, idx) => ({
-            id: idx + 1,
-            exchange: w.exchange || "binance_alpha",
-            price: Number(w.price),
-            usd_value: Number(w.usd_value),
-            status: "ACTIVE",
-            respect_rate: Math.round((w.respect_rate ?? 0.75) * 100),
-            detected_at: w.last_seen || "2026-10-31T10:50:00.000Z",
-          })),
-        });
-        setNowMs(Date.now());
-        return;
-      }
-
-      setCoinData(buildFallbackCoinDetail(symbol));
-      setNowMs(Date.now());
     } catch {
-      setCoinData(buildFallbackCoinDetail(symbol));
-      setNowMs(Date.now());
-    } finally {
-      setIsLoading(false);
+      // Instant WebSocket data is already displayed, so no error screen needed
     }
   }, [symbol]);
 
   useEffect(() => {
     setNowMs(Date.now());
-    fetchCoinDetails();
-  }, [fetchCoinDetails]);
+    fetchBackgroundCoinDetails();
+  }, [fetchBackgroundCoinDetails]);
+
+  // Merge API data (when ready) over Instant WebSocket Data
+  const coinData: CoinDetailData | null = useMemo(() => {
+    if (apiCoinData && apiCoinData.symbol === symbol) {
+      return {
+        ...apiCoinData,
+        signals:
+          apiCoinData.signals?.length > 0
+            ? apiCoinData.signals
+            : instantSocketData?.signals || [],
+        wall_history:
+          apiCoinData.wall_history?.length > 0
+            ? apiCoinData.wall_history
+            : instantSocketData?.wall_history || [],
+      };
+    }
+    return instantSocketData;
+  }, [apiCoinData, instantSocketData, symbol]);
 
   const primarySignal = useMemo(() => {
     if (!coinData || coinData.signals.length === 0) return null;
@@ -238,7 +216,7 @@ function CoinDetailContent() {
     }
   };
 
-  if (isLoading || !coinData) {
+  if (!coinData) {
     return <CoinDetailSkeleton />;
   }
 
@@ -247,7 +225,6 @@ function CoinDetailContent() {
       <main className="relative mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6">
         {/* 1. UNIFIED TOP ROW: Token Name & Live Price (Left) + 3 Inline Token History Cards (Right) */}
         <div className="flex flex-col justify-between gap-3.5 rounded-2xl border border-slate-800/90 bg-slate-900/70 px-5 py-3.5 backdrop-blur-xl xl:flex-row xl:items-center">
-          {/* Left: Back Button + Symbol + Live Price + 24H Badge */}
           <div className="flex items-center gap-3.5">
             <Link
               href="/signals"
@@ -291,9 +268,8 @@ function CoinDetailContent() {
             </div>
           </div>
 
-          {/* Right: 3 Compact Inline Token History Cards (Next to Token Name!) */}
+          {/* Right: 3 Compact Inline Token History Cards */}
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 xl:w-auto">
-            {/* Inline Card 1: Coin Win Rate */}
             <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-700/60 bg-[#080B12]/90 px-4 py-2.5">
               <div>
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -313,7 +289,6 @@ function CoinDetailContent() {
               </div>
             </div>
 
-            {/* Inline Card 2: Total Signals Logged */}
             <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-700/60 bg-[#080B12]/90 px-4 py-2.5">
               <div>
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -333,7 +308,6 @@ function CoinDetailContent() {
               </div>
             </div>
 
-            {/* Inline Card 3: Active Bid Walls & Respect Rate */}
             <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-700/60 bg-[#080B12]/90 px-4 py-2.5">
               <div>
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -355,7 +329,7 @@ function CoinDetailContent() {
           </div>
         </div>
 
-        {/* 2. FULL-VIEW CHARTS ROW (Fits Completely in Viewport Without Cutting Off!) */}
+        {/* 2. FULL-VIEW CHARTS ROW */}
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-12">
           <div className="lg:col-span-7">
             <TradingChart
@@ -389,7 +363,7 @@ function CoinDetailContent() {
           </div>
         </div>
 
-        {/* 3. FRAMER MOTION TABS: Signal History vs Wall History */}
+        {/* 3. TABS: Signal History vs Wall History */}
         <div className="rounded-2xl border border-slate-800/90 bg-slate-900/60 backdrop-blur-xl">
           <div className="flex items-center gap-2 border-b border-slate-800 px-5 pt-3">
             <button
@@ -551,7 +525,9 @@ function CoinDetailContent() {
                             ${formatCryptoPrice(w.price)}
                           </strong>
                         </span>
-                        <span>{formatSafeRelativeTime(w.detected_at, nowMs)}</span>
+                        <span>
+                          {formatSafeRelativeTime(w.detected_at, nowMs)}
+                        </span>
                       </div>
 
                       <div className="mt-2.5 space-y-1">
@@ -582,7 +558,6 @@ function CoinDetailContent() {
   );
 }
 
-// Default Export Wrapped in <Suspense> to satisfy Next.js Prerender Requirement
 export default function CoinDetailPage() {
   return (
     <Suspense fallback={<CoinDetailSkeleton />}>
