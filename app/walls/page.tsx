@@ -1,16 +1,10 @@
 // app/walls/page.tsx
 "use client";
 
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  useTransition,
-} from "react";
+import React, { useState, useMemo } from "react";
 import WallTable from "@/components/WallTable";
 import DepthChart from "@/components/DepthChart";
-import { BidWall } from "@/types/types";
+import { useDashboardSocket } from "@/context/DashboardSocketContext";
 import {
   Shield,
   Flame,
@@ -20,67 +14,10 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const POLL_INTERVAL_MS = 7000;
-
-const FALLBACK_WALLS: BidWall[] = [
-  {
-    symbol: "CT",
-    exchange: "bitget",
-    price: 0.14015,
-    usd_value: 41547,
-    respect_rate: 0.21,
-    last_seen: "2026-10-31T11:26:00.000Z",
-  },
-  {
-    symbol: "AXIS",
-    exchange: "kucoin",
-    price: 0.136,
-    usd_value: 25227,
-    respect_rate: 0.78,
-    last_seen: "2026-10-31T11:25:30.000Z",
-  },
-];
-
 export default function LiveWallsPage() {
-  const [walls, setWalls] = useState<BidWall[]>([]);
+  const { walls, isInitialLoading, triggerRefresh } = useDashboardSocket();
   const [searchSymbol, setSearchSymbol] = useState<string>("");
   const [selectedWallSymbol, setSelectedWallSymbol] = useState<string>("");
-
-  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [isPending, startTransition] = useTransition();
-
-  const fetchWalls = useCallback(async (isManual = false) => {
-    if (isManual) setIsRefreshing(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/walls/active`, {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error("API offline");
-      const data = await res.json();
-      const raw: BidWall[] = Array.isArray(data) ? data : data.walls || [];
-
-      startTransition(() => {
-        setWalls(raw);
-      });
-    } catch {
-      startTransition(() => {
-        setWalls((prev) => (prev.length > 0 ? prev : FALLBACK_WALLS));
-      });
-    } finally {
-      setIsInitialLoading(false);
-      setIsRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchWalls(false);
-    const timer = setInterval(() => {
-      fetchWalls(false);
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [fetchWalls]);
 
   const filteredWalls = useMemo(() => {
     return walls.filter((w) => {
@@ -116,6 +53,7 @@ export default function LiveWallsPage() {
       filteredWalls[0] || {
         symbol: "CT",
         price: 0.14015,
+        mid_price: 0.14021,
         usd_value: 41547,
       }
     );
@@ -123,10 +61,9 @@ export default function LiveWallsPage() {
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-3 sm:px-6 pb-16">
-      {/* Sleek, Compact 3-Card Top Strip (Saves vertical space so Bid Walls appear right at the top!) */}
+      {/* Sleek 3-Card Top Strip */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {/* Compact Card 1: Total Tracked Bid Depth */}
-        <div className="relative flex items-center justify-between overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md backdrop-blur-xl">
+        <div className="relative flex items-center justify-between overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md">
           <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent opacity-80" />
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
@@ -146,8 +83,7 @@ export default function LiveWallsPage() {
           </p>
         </div>
 
-        {/* Compact Card 2: Mega Whale Walls (>$50K) */}
-        <div className="relative flex items-center justify-between overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md backdrop-blur-xl">
+        <div className="relative flex items-center justify-between overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md">
           <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-amber-400/80 to-transparent opacity-80" />
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400">
@@ -172,8 +108,7 @@ export default function LiveWallsPage() {
           </div>
         </div>
 
-        {/* Compact Card 3: Quick Filter & Sync */}
-        <div className="relative flex items-center justify-between gap-3 overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md backdrop-blur-xl">
+        <div className="relative flex items-center justify-between gap-3 overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md">
           <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent opacity-80" />
           <div className="flex items-center gap-2.5 shrink-0">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
@@ -191,26 +126,22 @@ export default function LiveWallsPage() {
                 type="text"
                 value={searchSymbol}
                 onChange={(e) => setSearchSymbol(e.target.value)}
-                placeholder="Search wall token (e.g. CT, AXIS)..."
+                placeholder="Search wall token..."
                 className="w-full rounded-lg border border-slate-700/60 bg-[#07090E] py-1.5 pl-8 pr-3 text-xs text-white placeholder-slate-500 focus:border-emerald-500/50 focus:outline-none"
               />
             </div>
             <button
-              onClick={() => fetchWalls(true)}
-              title="Sync Walls Now"
+              onClick={triggerRefresh}
+              title="Instant WebSocket Sync"
               className="rounded-lg border border-white/10 bg-white/[0.04] p-1.5 text-slate-200 transition hover:border-emerald-500/40 hover:text-emerald-300"
             >
-              <RefreshCw
-                className={`h-4 w-4 ${
-                  isRefreshing || isPending ? "animate-spin text-emerald-400" : ""
-                }`}
-              />
+              <RefreshCw className="h-4 w-4" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Main Content Grid: Bid Walls Immediately Visible at Top + Sticky Depth Chart */}
+      {/* Main Content Grid */}
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
         <div className="lg:col-span-7">
           <WallTable

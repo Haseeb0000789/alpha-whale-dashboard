@@ -1,18 +1,12 @@
 // app/signals/page.tsx
 "use client";
 
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  useTransition,
-} from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useDashboardSocket } from "@/context/DashboardSocketContext";
 import { exportToCSV } from "@/components/SignalTable";
 import {
-  Signal,
   TimeframeFilter,
   formatCryptoPrice,
   formatPatternName,
@@ -32,9 +26,6 @@ import {
   Zap,
 } from "lucide-react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const POLL_INTERVAL_MS = 7000;
-
 const TIMEFRAMES: TimeframeFilter[] = ["ALL", "15m", "1h", "4h", "1d"];
 
 const PATTERN_OPTIONS = [
@@ -50,13 +41,11 @@ const PATTERN_OPTIONS = [
 
 type SortMode = "relevance" | "confidence" | "time";
 
-// Prerender-safe relative time helper using state timestamp (nowMs)
 function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): string {
   if (!isoDate || nowMs <= 0) return "Just now";
   const dateMs = new Date(isoDate).getTime();
   if (isNaN(dateMs)) return "Just now";
   const diffSeconds = Math.max(0, Math.floor((nowMs - dateMs) / 1000));
-
   if (diffSeconds < 60) return `${diffSeconds}s ago`;
   const diffMinutes = Math.floor(diffSeconds / 60);
   if (diffMinutes < 60) return `${diffMinutes}m ago`;
@@ -65,27 +54,18 @@ function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): str
   return `${Math.floor(diffHours / 24)}d ago`;
 }
 
-// Circular SVG Score Gauge
 function ScoreCircleBadge({ score }: { score: number }) {
   const radius = 20;
   const circumference = 2 * Math.PI * radius;
   const clamped = Math.min(100, Math.max(0, score));
   const offset = circumference - (clamped / 100) * circumference;
-
   const strokeColor =
     clamped >= 80 ? "#10b981" : clamped >= 68 ? "#06b6d4" : "#f59e0b";
 
   return (
     <div className="relative flex h-12 w-12 items-center justify-center">
       <svg className="h-12 w-12 -rotate-90 transform" viewBox="0 0 48 48">
-        <circle
-          cx="24"
-          cy="24"
-          r={radius}
-          stroke="rgba(255,255,255,0.08)"
-          strokeWidth="4"
-          fill="transparent"
-        />
+        <circle cx="24" cy="24" r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth="4" fill="transparent" />
         <circle
           cx="24"
           cy="24"
@@ -107,16 +87,9 @@ function ScoreCircleBadge({ score }: { score: number }) {
 
 export default function SignalsGridPage() {
   const router = useRouter();
-  const [signals, setSignals] = useState<Signal[]>([]);
-
-  // Fix Next.js Prerender Error: Only update current timestamp inside useEffect / callbacks
+  const { signals, isInitialLoading, triggerRefresh } = useDashboardSocket();
   const [nowMs, setNowMs] = useState<number>(0);
 
-  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [isPending, startTransition] = useTransition();
-
-  // Filters & Controls
   const [selectedTf, setSelectedTf] = useState<TimeframeFilter>("ALL");
   const [selectedPattern, setSelectedPattern] = useState<string>("ALL");
   const [minScore, setMinScore] = useState<number>(0);
@@ -124,38 +97,9 @@ export default function SignalsGridPage() {
   const [onlyReady, setOnlyReady] = useState<boolean>(false);
   const [sortMode, setSortMode] = useState<SortMode>("relevance");
 
-  const fetchSignals = useCallback(async (isManual = false) => {
-    if (isManual) setIsRefreshing(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/signals`, {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error("API offline");
-      const data = await res.json();
-      const raw: Signal[] = Array.isArray(data) ? data : data.signals || [];
-
-      startTransition(() => {
-        setNowMs(Date.now());
-        setSignals(raw);
-      });
-    } catch {
-      startTransition(() => {
-        setNowMs(Date.now());
-      });
-    } finally {
-      setIsInitialLoading(false);
-      setIsRefreshing(false);
-    }
-  }, []);
-
   useEffect(() => {
     setNowMs(Date.now());
-    fetchSignals(false);
-    const timer = setInterval(() => {
-      fetchSignals(false);
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [fetchSignals]);
+  }, [signals]);
 
   const filteredSignals = useMemo(() => {
     if (signals.length === 0) return [];
@@ -197,10 +141,10 @@ export default function SignalsGridPage() {
         const wallBonusA = (a.p2_wall_score ?? 0) > 0 ? 15 : 0;
         const wallBonusB = (b.p2_wall_score ?? 0) > 0 ? 15 : 0;
 
-        const relA = a.confidence + freshScoreA + readyBonusA + wallBonusA;
-        const relB = b.confidence + freshScoreB + readyBonusB + wallBonusB;
-
-        return relB - relA;
+        return (
+          b.confidence + freshScoreB + readyBonusB + wallBonusB -
+          (a.confidence + freshScoreA + readyBonusA + wallBonusA)
+        );
       }
 
       if (sortMode === "confidence") {
@@ -210,9 +154,7 @@ export default function SignalsGridPage() {
 
       const bucketA = Math.floor(timeA / 120000);
       const bucketB = Math.floor(timeB / 120000);
-      if (bucketB !== bucketA) {
-        return bucketB - bucketA;
-      }
+      if (bucketB !== bucketA) return bucketB - bucketA;
       return b.confidence - a.confidence;
     });
   }, [
@@ -228,7 +170,6 @@ export default function SignalsGridPage() {
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-4 px-4 py-4 sm:px-6 pb-20">
-      {/* Top Filter & Control Panel */}
       <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-xl space-y-3.5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -250,7 +191,6 @@ export default function SignalsGridPage() {
             </div>
           </div>
 
-          {/* Search, CSV Export & Timeframe Buttons */}
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="relative flex-1 sm:flex-initial">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -291,9 +231,8 @@ export default function SignalsGridPage() {
           </div>
         </div>
 
-        {/* Secondary Bar: Sort on LEFT, Pattern + Min Score + Ready Only on RIGHT */}
+        {/* Sort on LEFT, Pattern + Min Score + Ready Only on RIGHT */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-800/80 pt-3 text-xs">
-          {/* LEFT SIDE: Sort Options */}
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 flex items-center gap-1 text-slate-400">
               <ArrowUpDown className="h-3.5 w-3.5 text-cyan-400" /> Sort:
@@ -302,7 +241,7 @@ export default function SignalsGridPage() {
               onClick={() => setSortMode("relevance")}
               className={`rounded-lg px-2.5 py-1 font-bold transition ${
                 sortMode === "relevance"
-                  ? "border border-emerald-500/40 bg-emerald-500/20 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]"
+                  ? "border border-emerald-500/40 bg-emerald-500/20 text-emerald-300"
                   : "text-slate-400 hover:text-white"
               }`}
             >
@@ -330,13 +269,12 @@ export default function SignalsGridPage() {
             </button>
           </div>
 
-          {/* RIGHT SIDE: Ready Only + Min Score Slider + Pattern Dropdown */}
           <div className="flex flex-wrap items-center gap-4">
             <button
               onClick={() => setOnlyReady(!onlyReady)}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 font-semibold transition ${
                 onlyReady
-                  ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]"
+                  ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-300"
                   : "border-slate-700/60 bg-white/[0.03] text-slate-400 hover:text-white"
               }`}
             >
@@ -378,7 +316,6 @@ export default function SignalsGridPage() {
         </div>
       </div>
 
-      {/* 3-Column Responsive Cards Grid */}
       <div className="min-h-[520px]">
         {isInitialLoading && signals.length === 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -388,24 +325,6 @@ export default function SignalsGridPage() {
                 className="h-60 animate-pulse rounded-2xl border border-slate-800/80 bg-slate-900/50 p-5"
               />
             ))}
-          </div>
-        ) : filteredSignals.length === 0 ? (
-          <div className="flex h-72 flex-col items-center justify-center rounded-2xl border border-slate-800/80 bg-slate-900/40 p-8 text-center">
-            <p className="text-sm font-semibold text-slate-300">
-              No breakout signals match your active filters.
-            </p>
-            <button
-              onClick={() => {
-                setSelectedTf("ALL");
-                setSelectedPattern("ALL");
-                setMinScore(0);
-                setSearchQuery("");
-                setOnlyReady(false);
-              }}
-              className="mt-3 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-4 py-2 text-xs font-bold text-cyan-300"
-            >
-              Reset All Filters
-            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -435,25 +354,22 @@ export default function SignalsGridPage() {
                     }
                     className={`group relative flex cursor-pointer flex-col justify-between rounded-2xl border p-5 shadow-lg backdrop-blur-xl transition-all duration-200 hover:-translate-y-1 hover:scale-[1.01] ${
                       !sig.is_extended && isFresh
-                        ? "border-emerald-500/40 bg-gradient-to-b from-emerald-500/[0.08] via-slate-900/90 to-[#0A0E17] hover:border-emerald-400/70 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]"
-                        : "border-slate-800/90 bg-gradient-to-b from-slate-900/90 to-[#0A0E17] hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.18)]"
+                        ? "border-emerald-500/40 bg-gradient-to-b from-emerald-500/[0.08] via-slate-900/90 to-[#0A0E17] hover:border-emerald-400/70"
+                        : "border-slate-800/90 bg-gradient-to-b from-slate-900/90 to-[#0A0E17] hover:border-cyan-500/50"
                     }`}
                   >
-                    {/* Card Top: Symbol + Timeframe + Score Gauge */}
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1 text-xl font-black tracking-tight text-white transition group-hover:text-cyan-300">
+                          <span className="inline-flex items-center gap-1 text-xl font-black tracking-tight text-white group-hover:text-cyan-300">
                             <span>{cleanSym}</span>
-                            <ArrowUpRight className="h-4 w-4 text-cyan-400 opacity-80 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                            <ArrowUpRight className="h-4 w-4 text-cyan-400" />
                           </span>
-
                           <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/15 px-2 py-0.5 font-mono text-xs font-bold text-cyan-300">
                             {sig.timeframe}
                           </span>
-
                           {isFresh && !sig.is_extended && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 animate-pulse">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
                               <Zap className="h-2.5 w-2.5" /> Fresh
                             </span>
                           )}
@@ -479,7 +395,6 @@ export default function SignalsGridPage() {
                       <ScoreCircleBadge score={sig.confidence} />
                     </div>
 
-                    {/* Card Middle: Pattern Structure + SMC + Volume Flow Badges */}
                     <div className="my-3.5 space-y-2.5 border-y border-white/[0.06] py-3">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
@@ -494,19 +409,16 @@ export default function SignalsGridPage() {
                         <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-300">
                           Vol {(sig.volume_ratio ?? 2.1).toFixed(1)}x
                         </span>
-
                         {sig.smc_bos && (
                           <span className="inline-flex items-center gap-1 rounded-md border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[10px] font-semibold text-purple-300">
                             <Sparkles className="h-2.5 w-2.5" /> SMC BoS
                           </span>
                         )}
-
                         {sig.smc_ob && (
                           <span className="rounded-md border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
                             📦 OB Zone
                           </span>
                         )}
-
                         {(sig.p2_wall_score ?? 0) > 0 && (
                           <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
                             🧱 L2 Bid Wall
@@ -515,7 +427,6 @@ export default function SignalsGridPage() {
                       </div>
                     </div>
 
-                    {/* Card Bottom Grid: Entry Zone, Stop Loss, TP1 */}
                     <div className="grid grid-cols-3 gap-2">
                       <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-2.5 text-center">
                         <span className="block text-[10px] font-semibold uppercase text-cyan-300/80">
@@ -525,7 +436,6 @@ export default function SignalsGridPage() {
                           ${formatCryptoPrice(entryVal)}
                         </span>
                       </div>
-
                       <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.07] p-2.5 text-center">
                         <span className="block text-[10px] font-semibold uppercase text-rose-300/80">
                           Stop Loss
@@ -534,7 +444,6 @@ export default function SignalsGridPage() {
                           ${formatCryptoPrice(sig.stop_loss)}
                         </span>
                       </div>
-
                       <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-2.5 text-center">
                         <span className="block text-[10px] font-semibold uppercase text-emerald-300/80">
                           TP1 (1.5R)
@@ -552,15 +461,12 @@ export default function SignalsGridPage() {
         )}
       </div>
 
-      {/* Mobile Floating Refresh Button */}
       <button
-        onClick={() => fetchSignals(true)}
+        onClick={triggerRefresh}
         aria-label="Refresh Signals"
-        className="fixed bottom-6 right-5 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/50 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-[0_0_25px_rgba(6,182,212,0.5)] transition active:scale-90 md:hidden"
+        className="fixed bottom-6 right-5 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/50 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-lg md:hidden"
       >
-        <RefreshCw
-          className={`h-5 w-5 ${isRefreshing || isPending ? "animate-spin" : ""}`}
-        />
+        <RefreshCw className="h-5 w-5" />
       </button>
     </main>
   );
