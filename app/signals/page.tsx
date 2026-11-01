@@ -7,6 +7,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useDashboardSocket } from "@/context/DashboardSocketContext";
 import { exportToCSV } from "@/components/SignalTable";
 import {
+  Signal,
+  SignalOutcomeStatus,
   TimeframeFilter,
   formatCryptoPrice,
   formatPatternName,
@@ -24,12 +26,13 @@ import {
   Cpu,
   ArrowUpDown,
   Zap,
+  Trophy,
+  ShieldCheck,
+  XCircle,
+  Clock,
 } from "lucide-react";
 
 const TIMEFRAMES: TimeframeFilter[] = ["ALL", "15m", "1h", "4h", "1d"];
-
-// NEW: Outcome filter type (was referenced but never defined)
-type OutcomeFilter = "ALL" | "PENDING" | "TP_HIT" | "SL_HIT";
 
 const PATTERN_OPTIONS = [
   { value: "ALL", label: "All Patterns" },
@@ -43,6 +46,7 @@ const PATTERN_OPTIONS = [
 ];
 
 type SortMode = "relevance" | "confidence" | "time";
+type OutcomeFilter = "ALL" | "IN_PLAY" | "TP_HIT" | "BREAKEVEN" | "SL_HIT";
 
 function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): string {
   if (!isoDate || nowMs <= 0) return "Just now";
@@ -68,7 +72,14 @@ function ScoreCircleBadge({ score }: { score: number }) {
   return (
     <div className="relative flex h-12 w-12 items-center justify-center">
       <svg className="h-12 w-12 -rotate-90 transform" viewBox="0 0 48 48">
-        <circle cx="24" cy="24" r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth="4" fill="transparent" />
+        <circle
+          cx="24"
+          cy="24"
+          r={radius}
+          stroke="rgba(255,255,255,0.08)"
+          strokeWidth="4"
+          fill="transparent"
+        />
         <circle
           cx="24"
           cy="24"
@@ -88,29 +99,108 @@ function ScoreCircleBadge({ score }: { score: number }) {
   );
 }
 
+// Renders the exact live trade outcome badge (TP2, TP1, Breakeven, SL Hit, or In-Play)
+function OutcomeStatusBadge({ sig }: { sig: Signal }) {
+  const status: SignalOutcomeStatus = sig.outcome_status || "IN_PLAY";
+  const maxGain = sig.max_gain_pct ?? 0;
+  const maxDd = sig.max_drawdown_pct ?? 0;
+
+  if (status === "TP2_HIT") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-400/50 bg-emerald-500/20 px-2.5 py-0.5 font-mono text-[11px] font-extrabold text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.25)]">
+        <Trophy className="h-3 w-3 text-emerald-400" />
+        🚀 TP2 Hit {maxGain > 0 ? `(+${maxGain.toFixed(1)}%)` : ""}
+      </span>
+    );
+  }
+
+  if (status === "TP1_HIT") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300">
+        <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+        🎯 TP1 Hit {maxGain > 0 ? `(+${maxGain.toFixed(1)}%)` : ""}
+      </span>
+    );
+  }
+
+  if (status === "BREAKEVEN") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-0.5 font-mono text-[11px] font-bold text-cyan-300">
+        <ShieldCheck className="h-3 w-3 text-cyan-400" />
+        🛡️ Breakeven Saved {maxGain > 0 ? `(Peak +${maxGain.toFixed(1)}%)` : ""}
+      </span>
+    );
+  }
+
+  if (status === "SL_HIT") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-rose-500/15 px-2.5 py-0.5 font-mono text-[11px] font-bold text-rose-300">
+        <XCircle className="h-3 w-3 text-rose-400" />
+        🛑 SL Hit {maxDd < 0 ? `(${maxDd.toFixed(1)}%)` : ""}
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-0.5 font-mono text-[11px] font-bold text-amber-300">
+      <Clock className="h-3 w-3 text-amber-400" />
+      ⏳ In-Play {maxGain > 0 ? `(+${maxGain.toFixed(1)}% MFE)` : ""}
+    </span>
+  );
+}
+
 export default function SignalsGridPage() {
   const router = useRouter();
-  const { signals, settings, isInitialLoading, triggerRefresh } = useDashboardSocket();
+  const { signals, isInitialLoading, triggerRefresh } = useDashboardSocket();
   const [nowMs, setNowMs] = useState<number>(0);
 
   const [selectedTf, setSelectedTf] = useState<TimeframeFilter>("ALL");
   const [selectedPattern, setSelectedPattern] = useState<string>("ALL");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("ALL");
-  // Initialize Min Score directly from Control Center settings (e.g., 65)!
-  const [minScore, setMinScore] = useState<number>(settings?.min_score ?? 65);
+  const [minScore, setMinScore] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [onlyReady, setOnlyReady] = useState<boolean>(false);
   const [sortMode, setSortMode] = useState<SortMode>("relevance");
 
-  // Keep slider synced whenever Control Center min_score is updated
-  useEffect(() => {
-    if (settings?.min_score !== undefined) {
-      setMinScore(settings.min_score);
-    }
-  }, [settings?.min_score]);
-
   useEffect(() => {
     setNowMs(Date.now());
+  }, [signals]);
+
+  // Calculate exact counts of TP Hit, Breakeven, SL Hit, and Live In-Play across all loaded signals
+  const outcomeCounts = useMemo(() => {
+    let inPlay = 0;
+    let tpHit = 0;
+    let tp1Only = 0;
+    let tp2Hit = 0;
+    let breakeven = 0;
+    let slHit = 0;
+
+    for (const s of signals) {
+      const st = s.outcome_status || "IN_PLAY";
+      if (st === "TP2_HIT") {
+        tpHit++;
+        tp2Hit++;
+      } else if (st === "TP1_HIT") {
+        tpHit++;
+        tp1Only++;
+      } else if (st === "BREAKEVEN") {
+        breakeven++;
+      } else if (st === "SL_HIT") {
+        slHit++;
+      } else {
+        inPlay++;
+      }
+    }
+
+    return {
+      total: signals.length,
+      inPlay,
+      tpHit,
+      tp1Only,
+      tp2Hit,
+      breakeven,
+      slHit,
+    };
   }, [signals]);
 
   const filteredSignals = useMemo(() => {
@@ -120,32 +210,31 @@ export default function SignalsGridPage() {
       const cleanSym = sig.symbol.trim().toUpperCase();
       if (onlyReady && sig.is_extended) return false;
 
+      const st = sig.outcome_status || "IN_PLAY";
+      if (outcomeFilter === "IN_PLAY" && st !== "IN_PLAY") return false;
+      if (
+        outcomeFilter === "TP_HIT" &&
+        st !== "TP1_HIT" &&
+        st !== "TP2_HIT"
+      ) {
+        return false;
+      }
+      if (outcomeFilter === "BREAKEVEN" && st !== "BREAKEVEN") return false;
+      if (outcomeFilter === "SL_HIT" && st !== "SL_HIT") return false;
+
       const matchesTf =
         selectedTf === "ALL" ||
         sig.timeframe.toLowerCase() === selectedTf.toLowerCase();
       const matchesPattern =
         selectedPattern === "ALL" ||
         sig.structure.toLowerCase() === selectedPattern.toLowerCase();
-
-      // NEW: outcome filter (falls back to PENDING if backend doesn't emit the field yet)
-      const signalOutcome =
-        (sig as any).outcome ?? (sig as any).status ?? "PENDING";
-      const matchesOutcome =
-        outcomeFilter === "ALL" || signalOutcome === outcomeFilter;
-
       const matchesScore = sig.confidence >= minScore;
       const matchesSearch =
         !searchQuery.trim() ||
         cleanSym.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
         sig.structure.toLowerCase().includes(searchQuery.trim().toLowerCase());
 
-      return (
-        matchesTf &&
-        matchesPattern &&
-        matchesOutcome &&
-        matchesScore &&
-        matchesSearch
-      );
+      return matchesTf && matchesPattern && matchesScore && matchesSearch;
     });
 
     return [...list].sort((a, b) => {
@@ -166,9 +255,21 @@ export default function SignalsGridPage() {
         const wallBonusA = (a.p2_wall_score ?? 0) > 0 ? 15 : 0;
         const wallBonusB = (b.p2_wall_score ?? 0) > 0 ? 15 : 0;
 
+        // Prioritize active In-Play signals when sorting by Most Relevant
+        const activeBonusA = (a.outcome_status || "IN_PLAY") === "IN_PLAY" ? 20 : 0;
+        const activeBonusB = (b.outcome_status || "IN_PLAY") === "IN_PLAY" ? 20 : 0;
+
         return (
-          b.confidence + freshScoreB + readyBonusB + wallBonusB -
-          (a.confidence + freshScoreA + readyBonusA + wallBonusA)
+          b.confidence +
+          freshScoreB +
+          readyBonusB +
+          wallBonusB +
+          activeBonusB -
+          (a.confidence +
+            freshScoreA +
+            readyBonusA +
+            wallBonusA +
+            activeBonusA)
         );
       }
 
@@ -195,26 +296,125 @@ export default function SignalsGridPage() {
   ]);
 
   return (
-    <main className="mx-auto max-w-[1600px] space-y-4 px-4 py-4 sm:px-6 pb-20">
-      <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-xl space-y-3.5">
+    <main className="mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6 pb-20">
+      {/* 1. LIVE OUTCOME BREAKDOWN STRIP (Click any pill to filter by TP Hit, Breakeven, SL Hit, or In-Play!) */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+        <button
+          onClick={() => setOutcomeFilter("ALL")}
+          className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
+            outcomeFilter === "ALL"
+              ? "border-cyan-500/50 bg-cyan-500/15 shadow-[0_0_20px_rgba(6,182,212,0.15)]"
+              : "border-slate-800/90 bg-slate-900/60 hover:border-slate-700"
+          }`}
+        >
+          <div>
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Total Signals (7D)
+            </span>
+            <span className="font-mono text-xl font-black text-white">
+              {outcomeCounts.total}
+            </span>
+          </div>
+          <Cpu className="h-4 w-4 text-cyan-400" />
+        </button>
+
+        <button
+          onClick={() => setOutcomeFilter("IN_PLAY")}
+          className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
+            outcomeFilter === "IN_PLAY"
+              ? "border-amber-500/50 bg-amber-500/15 shadow-[0_0_20px_rgba(245,158,11,0.15)]"
+              : "border-slate-800/90 bg-slate-900/60 hover:border-slate-700"
+          }`}
+        >
+          <div>
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-amber-300/90">
+              ⏳ Live In-Play
+            </span>
+            <span className="font-mono text-xl font-black text-amber-400">
+              {outcomeCounts.inPlay}
+            </span>
+          </div>
+          <Clock className="h-4 w-4 text-amber-400" />
+        </button>
+
+        <button
+          onClick={() => setOutcomeFilter("TP_HIT")}
+          className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
+            outcomeFilter === "TP_HIT"
+              ? "border-emerald-500/50 bg-emerald-500/15 shadow-[0_0_20px_rgba(16,185,129,0.15)]"
+              : "border-slate-800/90 bg-slate-900/60 hover:border-slate-700"
+          }`}
+        >
+          <div>
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-300/90">
+              🎯 TP1 / TP2 Hit
+            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-mono text-xl font-black text-emerald-400">
+                {outcomeCounts.tpHit}
+              </span>
+              <span className="font-mono text-[10px] text-emerald-300/80">
+                (TP2: {outcomeCounts.tp2Hit})
+              </span>
+            </div>
+          </div>
+          <Trophy className="h-4 w-4 text-emerald-400" />
+        </button>
+
+        <button
+          onClick={() => setOutcomeFilter("BREAKEVEN")}
+          className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
+            outcomeFilter === "BREAKEVEN"
+              ? "border-cyan-400/50 bg-cyan-500/15 shadow-[0_0_20px_rgba(6,182,212,0.15)]"
+              : "border-slate-800/90 bg-slate-900/60 hover:border-slate-700"
+          }`}
+        >
+          <div>
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-cyan-300/90">
+              🛡️ Breakeven Exit
+            </span>
+            <span className="font-mono text-xl font-black text-cyan-400">
+              {outcomeCounts.breakeven}
+            </span>
+          </div>
+          <ShieldCheck className="h-4 w-4 text-cyan-400" />
+        </button>
+
+        <button
+          onClick={() => setOutcomeFilter("SL_HIT")}
+          className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
+            outcomeFilter === "SL_HIT"
+              ? "border-rose-500/50 bg-rose-500/15 shadow-[0_0_20px_rgba(244,63,94,0.15)]"
+              : "border-slate-800/90 bg-slate-900/60 hover:border-slate-700"
+          }`}
+        >
+          <div>
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-rose-300/90">
+              🛑 Stopped Out (-SL)
+            </span>
+            <span className="font-mono text-xl font-black text-rose-400">
+              {outcomeCounts.slHit}
+            </span>
+          </div>
+          <XCircle className="h-4 w-4 text-rose-400" />
+        </button>
+      </div>
+
+      {/* 2. FILTER & SORT BAR */}
+      <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-xl space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
-              <Cpu className="h-4 w-4" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-base font-bold text-white sm:text-lg">
-                  4-Pillar Breakout Signals
-                </h1>
-                <span className="rounded-full border border-cyan-500/30 bg-cyan-500/15 px-2.5 py-0.5 font-mono text-xs font-bold text-cyan-300">
-                  {filteredSignals.length} Active
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Click any signal card to open its full Deep-Dive Chart & Order Book Terminal
-              </p>
-            </div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-sm font-bold text-white sm:text-base">
+              Showing {filteredSignals.length} of {signals.length} Signals
+            </h1>
+            {outcomeFilter !== "ALL" && (
+              <button
+                onClick={() => setOutcomeFilter("ALL")}
+                className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/20"
+              >
+                Clear Outcome Filter ✕
+              </button>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
@@ -342,6 +542,7 @@ export default function SignalsGridPage() {
         </div>
       </div>
 
+      {/* 3. SIGNAL CARDS GRID */}
       <div className="min-h-[520px]">
         {isInitialLoading && signals.length === 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -379,14 +580,17 @@ export default function SignalsGridPage() {
                       router.push(`/coin/${encodeURIComponent(cleanSym)}`)
                     }
                     className={`group relative flex cursor-pointer flex-col justify-between rounded-2xl border p-5 shadow-lg backdrop-blur-xl transition-all duration-200 hover:-translate-y-1 hover:scale-[1.01] ${
-                      !sig.is_extended && isFresh
+                      sig.outcome_status === "TP1_HIT" ||
+                      sig.outcome_status === "TP2_HIT"
                         ? "border-emerald-500/40 bg-gradient-to-b from-emerald-500/[0.08] via-slate-900/90 to-[#0A0E17] hover:border-emerald-400/70"
+                        : sig.outcome_status === "SL_HIT"
+                        ? "border-rose-500/30 bg-gradient-to-b from-rose-500/[0.05] via-slate-900/90 to-[#0A0E17] hover:border-rose-400/50"
                         : "border-slate-800/90 bg-gradient-to-b from-slate-900/90 to-[#0A0E17] hover:border-cyan-500/50"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="inline-flex items-center gap-1 text-xl font-black tracking-tight text-white group-hover:text-cyan-300">
                             <span>{cleanSym}</span>
                             <ArrowUpRight className="h-4 w-4 text-cyan-400" />
@@ -401,20 +605,13 @@ export default function SignalsGridPage() {
                           )}
                         </div>
 
-                        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-                          <span>{formatSafeRelativeTime(sig.detected_at, nowMs)}</span>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                          <span>
+                            {formatSafeRelativeTime(sig.detected_at, nowMs)}
+                          </span>
                           <span>•</span>
-                          {sig.is_extended ? (
-                            <span className="inline-flex items-center gap-1 font-semibold text-amber-300">
-                              <AlertTriangle className="h-3 w-3 text-amber-400" />
-                              Wait for Retest
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 font-semibold text-emerald-300">
-                              <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-                              Ready
-                            </span>
-                          )}
+                          {/* Live Outcome Badge (TP1 / TP2 / Breakeven / SL / In-Play) */}
+                          <OutcomeStatusBadge sig={sig} />
                         </div>
                       </div>
 
@@ -448,6 +645,15 @@ export default function SignalsGridPage() {
                         {(sig.p2_wall_score ?? 0) > 0 && (
                           <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
                             🧱 L2 Bid Wall
+                          </span>
+                        )}
+                        {sig.is_extended ? (
+                          <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                            ⚠️ Extended
+                          </span>
+                        ) : (
+                          <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                            ✅ Ready Entry
                           </span>
                         )}
                       </div>
