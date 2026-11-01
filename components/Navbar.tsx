@@ -1,7 +1,7 @@
 // components/Navbar.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react"; // <-- Suspense Import kiya
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -25,7 +25,8 @@ const NAV_LINKS = [
   { name: "Live Walls", href: "/walls", icon: Shield, badge: "L2 Radar" },
 ];
 
-export default function Navbar() {
+// 1. INNER COMPONENT (Aapka asli Navbar yahan hai)
+function NavbarContent() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { isConnected, triggerRefresh } = useDashboardSocket();
@@ -195,5 +196,19 @@ export default function Navbar() {
         )}
       </AnimatePresence>
     </header>
+  );
+}
+
+// 2. OUTER COMPONENT (Yeh Suspense wrap karta hai taake Vercel build fail na ho)
+export default function Navbar() {
+  return (
+    <Suspense
+      fallback={
+        // Loading ke waqt ka dummy Navbar (taake screen na hile)
+        <div className="sticky top-0 z-40 h-[73px] w-full border-b border-slate-800/80 bg-[#07090E]/85 backdrop-blur-xl" />
+      }
+    >
+      <NavbarContent />
+    </Suspense>
   );
 }
