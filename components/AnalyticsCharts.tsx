@@ -35,6 +35,16 @@ function localDayKey(d: Date): string {
   return `${yr}-${mo}-${da}`;
 }
 
+function getWinRateBadgeClasses(winRatePct: number): string {
+  if (winRatePct >= 60) {
+    return "border-emerald-500/40 bg-emerald-500/15 text-emerald-300";
+  }
+  if (winRatePct >= 40) {
+    return "border-amber-500/40 bg-amber-500/15 text-amber-300";
+  }
+  return "border-rose-500/40 bg-rose-500/15 text-rose-300";
+}
+
 export default function AnalyticsCharts({
   signals,
   stats,
@@ -401,56 +411,99 @@ export default function AnalyticsCharts({
       {/* Row 2: Compact Pattern & Timeframe Breakdown */}
       {Boolean(stats?.by_structure?.length || stats?.by_timeframe?.length) && (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-12">
-          <div className="rounded-2xl border border-slate-800/90 bg-slate-900/60 px-4 py-3 backdrop-blur-xl lg:col-span-8">
-            <div className="mb-2 flex items-center gap-2">
-              <Layers className="h-3.5 w-3.5 text-emerald-400" />
-              <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                Signals Breakdown By Pattern (7D)
-              </h3>
+          <div className="rounded-2xl border border-slate-800/90 bg-slate-900/60 px-4 py-3 backdrop-blur-xl lg:col-span-7">
+            <div className="mb-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="h-3.5 w-3.5 text-emerald-400" />
+                <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  Signals Breakdown By Pattern (7D)
+                </h3>
+              </div>
+              <span className="font-mono text-[10px] text-slate-400">
+                Win Rate • Record
+              </span>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {(stats?.by_structure || []).slice(0, 6).map((item) => (
-                <div
-                  key={item.structure}
-                  className="flex items-center justify-between rounded-lg border border-white/[0.05] bg-black/30 px-2.5 py-1.5 text-[11px]"
-                >
-                  <div className="truncate pr-1">
-                    <span className="font-semibold text-slate-200">
-                      {formatPatternName(item.structure)}
-                    </span>
-                    <span className="ml-1 font-mono text-[10px] text-cyan-300">
-                      ({item.avg_confidence.toFixed(0)}%)
-                    </span>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {(stats?.by_structure || []).slice(0, 8).map((item) => {
+                const wr = Math.round(item.win_rate_pct ?? 0);
+                const wins = item.wins ?? 0;
+                const losses = item.losses ?? 0;
+                return (
+                  <div
+                    key={item.structure}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-black/35 px-3 py-2 text-[11px]"
+                  >
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-bold text-slate-100">
+                        {formatPatternName(item.structure)}
+                      </span>
+                      <span className="rounded border border-slate-700/80 bg-slate-800/80 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-300">
+                        {item.count}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                      <span
+                        className={`rounded border px-1.5 py-0.5 font-bold ${getWinRateBadgeClasses(
+                          wr
+                        )}`}
+                      >
+                        [ {wr}% Win ]
+                      </span>
+                      <span className="font-semibold text-slate-300">
+                        ({wins}W / {losses}L)
+                      </span>
+                    </div>
                   </div>
-                  <span className="rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-300">
-                    {item.count}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-800/90 bg-slate-900/60 px-4 py-3 backdrop-blur-xl lg:col-span-4">
-            <div className="mb-2 flex items-center gap-2">
-              <Clock className="h-3.5 w-3.5 text-cyan-400" />
-              <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                By Timeframe (7D)
-              </h3>
+          <div className="rounded-2xl border border-slate-800/90 bg-slate-900/60 px-4 py-3 backdrop-blur-xl lg:col-span-5">
+            <div className="mb-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="h-3.5 w-3.5 text-cyan-400" />
+                <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  By Timeframe (7D)
+                </h3>
+              </div>
+              <span className="font-mono text-[10px] text-slate-400">
+                Win Rate • Record
+              </span>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              {(stats?.by_timeframe || []).map((tf) => (
-                <div
-                  key={tf.timeframe}
-                  className="flex items-center justify-between rounded-lg border border-white/[0.05] bg-black/30 px-2.5 py-1.5"
-                >
-                  <span className="font-mono text-[11px] font-bold text-cyan-300">
-                    {tf.timeframe}
-                  </span>
-                  <span className="font-mono text-sm font-black text-white">
-                    {tf.count}
-                  </span>
-                </div>
-              ))}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {(stats?.by_timeframe || []).map((tf) => {
+                const wr = Math.round(tf.win_rate_pct ?? 0);
+                const wins = tf.wins ?? 0;
+                const losses = tf.losses ?? 0;
+                return (
+                  <div
+                    key={tf.timeframe}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-black/35 px-3 py-2"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs font-black uppercase text-cyan-300">
+                        {tf.timeframe}
+                      </span>
+                      <span className="rounded border border-slate-700/80 bg-slate-800/80 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white">
+                        {tf.count}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                      <span
+                        className={`rounded border px-1.5 py-0.5 font-bold ${getWinRateBadgeClasses(
+                          wr
+                        )}`}
+                      >
+                        [ {wr}% Win ]
+                      </span>
+                      <span className="font-semibold text-slate-300">
+                        ({wins}W / {losses}L)
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -13,6 +13,22 @@ import React, {
 } from "react";
 import { Signal, SignalStats, BidWall } from "@/types/types";
 
+export const ALL_TIMEFRAMES = ["15m", "1h", "4h", "1d"];
+
+export const ALL_PATTERNS = [
+  "double_bottom",
+  "cup_and_handle",
+  "inverse_head_shoulders",
+  "ascending_triangle",
+  "bullish_pennant",
+  "bullish_flag",
+  "descending_trendline",
+  "vwap_ema_pullback",
+  "liquidity_sweep_breakout",
+  "order_block_bounce",
+  "institutional_reaccumulation",
+];
+
 export interface BotSettings {
   min_score: number;
   min_wall_usd: number;
@@ -23,6 +39,8 @@ export interface BotSettings {
   enable_audio: boolean;
   cooldown_minutes: number;
   max_alerts_per_cycle: number;
+  enabled_timeframes: string[];
+  enabled_patterns: string[];
 }
 
 export const DEFAULT_SETTINGS: BotSettings = {
@@ -35,7 +53,25 @@ export const DEFAULT_SETTINGS: BotSettings = {
   enable_audio: true,
   cooldown_minutes: 30,
   max_alerts_per_cycle: 5,
+  enabled_timeframes: [...ALL_TIMEFRAMES],
+  enabled_patterns: [...ALL_PATTERNS],
 };
+
+function normalizeBotSettings(
+  raw: Partial<BotSettings> | null | undefined,
+  fallback: BotSettings
+): BotSettings {
+  const merged = { ...fallback, ...(raw ?? {}) };
+  return {
+    ...merged,
+    enabled_timeframes: Array.isArray(merged.enabled_timeframes)
+      ? merged.enabled_timeframes
+      : [...ALL_TIMEFRAMES],
+    enabled_patterns: Array.isArray(merged.enabled_patterns)
+      ? merged.enabled_patterns
+      : [...ALL_PATTERNS],
+  };
+}
 
 interface DashboardSocketState {
   signals: Signal[];
@@ -187,7 +223,7 @@ export function DashboardSocketProvider({
       if (saved) {
         const parsed = JSON.parse(saved);
         setSettings((prev) => {
-          const merged = { ...prev, ...parsed };
+          const merged = normalizeBotSettings(parsed, prev);
           settingsRef.current = merged;
           return merged;
         });
@@ -214,7 +250,7 @@ export function DashboardSocketProvider({
       if (setRes.ok) {
         const setJson = await setRes.json();
         setSettings((prev) => {
-          const merged = { ...prev, ...setJson };
+          const merged = normalizeBotSettings(setJson, prev);
           settingsRef.current = merged;
           try {
             localStorage.setItem(
@@ -384,7 +420,7 @@ export function DashboardSocketProvider({
               // Update settings if sent via WebSocket
               if (payload.settings) {
                 setSettings((prev) => {
-                  const merged = { ...prev, ...payload.settings };
+                  const merged = normalizeBotSettings(payload.settings, prev);
                   settingsRef.current = merged;
                   try {
                     localStorage.setItem(

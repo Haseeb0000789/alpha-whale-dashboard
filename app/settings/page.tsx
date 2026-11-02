@@ -7,7 +7,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   useDashboardSocket,
   BotSettings,
+  ALL_TIMEFRAMES,
+  ALL_PATTERNS,
 } from "@/context/DashboardSocketContext";
+import { formatPatternName } from "@/types/types";
 import {
   Settings,
   Sliders,
@@ -21,17 +24,36 @@ import {
   Cpu,
   Volume2,
   Sparkles,
+  Filter,
+  Clock,
+  Layers,
 } from "lucide-react";
+
+const SPOT_QUANT_PATTERNS = new Set([
+  "vwap_ema_pullback",
+  "liquidity_sweep_breakout",
+  "order_block_bounce",
+  "institutional_reaccumulation",
+]);
 
 export default function ControlCenterPage() {
   const { settings, saveBotSettings } = useDashboardSocket();
 
   // Local form draft overlaid on global WebSocket/localStorage settings
   const [draft, setDraft] = useState<Partial<BotSettings> | null>(null);
-  const formData: BotSettings = useMemo(
-    () => (draft ? { ...settings, ...draft } : settings),
-    [settings, draft]
-  );
+  const formData: BotSettings = useMemo(() => {
+    const merged = draft ? { ...settings, ...draft } : settings;
+    return {
+      ...merged,
+      enabled_timeframes: Array.isArray(merged.enabled_timeframes)
+        ? merged.enabled_timeframes
+        : [...ALL_TIMEFRAMES],
+      enabled_patterns: Array.isArray(merged.enabled_patterns)
+        ? merged.enabled_patterns
+        : [...ALL_PATTERNS],
+    };
+  }, [settings, draft]);
+
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [toast, setToast] = useState<{
     message: string;
@@ -65,6 +87,66 @@ export default function ControlCenterPage() {
     setDraft((prev) => ({ ...(prev ?? {}), [key]: value }));
   };
 
+  const handleToggleTimeframe = async (tf: string) => {
+    const current = formData.enabled_timeframes;
+    const isEnabled = current.includes(tf);
+    const nextTfs = isEnabled
+      ? current.filter((item) => item !== tf)
+      : [...current, tf];
+    const nextSettings: BotSettings = {
+      ...formData,
+      enabled_timeframes: nextTfs,
+    };
+    setDraft((prev) => ({ ...(prev ?? {}), enabled_timeframes: nextTfs }));
+    const ok = await saveBotSettings(nextSettings);
+    showToast(
+      ok
+        ? `Timeframe ${tf.toUpperCase()} ${isEnabled ? "disabled" : "enabled"} (${nextTfs.length}/${ALL_TIMEFRAMES.length} active)`
+        : `Timeframe ${tf.toUpperCase()} saved locally (Backend offline)`,
+      ok ? "synced" : "local"
+    );
+  };
+
+  const handleTogglePattern = async (pattern: string) => {
+    const current = formData.enabled_patterns;
+    const isEnabled = current.includes(pattern);
+    const nextPatterns = isEnabled
+      ? current.filter((item) => item !== pattern)
+      : [...current, pattern];
+    const nextSettings: BotSettings = {
+      ...formData,
+      enabled_patterns: nextPatterns,
+    };
+    setDraft((prev) => ({ ...(prev ?? {}), enabled_patterns: nextPatterns }));
+    const ok = await saveBotSettings(nextSettings);
+    showToast(
+      ok
+        ? `${formatPatternName(pattern)} ${isEnabled ? "disabled" : "enabled"} (${nextPatterns.length}/${ALL_PATTERNS.length} active)`
+        : `${formatPatternName(pattern)} saved locally (Backend offline)`,
+      ok ? "synced" : "local"
+    );
+  };
+
+  const handleEnableAllStrategies = async () => {
+    const nextSettings: BotSettings = {
+      ...formData,
+      enabled_timeframes: [...ALL_TIMEFRAMES],
+      enabled_patterns: [...ALL_PATTERNS],
+    };
+    setDraft((prev) => ({
+      ...(prev ?? {}),
+      enabled_timeframes: [...ALL_TIMEFRAMES],
+      enabled_patterns: [...ALL_PATTERNS],
+    }));
+    const ok = await saveBotSettings(nextSettings);
+    showToast(
+      ok
+        ? "All 4 Timeframes & 11 Strategy Patterns enabled and synced."
+        : "All Timeframes & Patterns enabled locally (Backend offline).",
+      ok ? "synced" : "local"
+    );
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -96,6 +178,8 @@ export default function ControlCenterPage() {
       enable_audio: true,
       cooldown_minutes: 30,
       max_alerts_per_cycle: 5,
+      enabled_timeframes: [...ALL_TIMEFRAMES],
+      enabled_patterns: [...ALL_PATTERNS],
     };
     setDraft(null);
     const ok = await saveBotSettings(recommended);
@@ -108,7 +192,7 @@ export default function ControlCenterPage() {
   };
 
   return (
-    <main className="mx-auto max-w-[1400px] space-y-4 px-4 py-4 sm:px-6 pb-20">
+    <main className="mx-auto max-w-[1400px] space-y-4 px-4 py-4 sm:px-6 pb-24">
       {/* Compact Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800/90 bg-slate-900/70 px-5 py-3.5 backdrop-blur-xl">
         <div className="flex items-center gap-3.5">
@@ -130,7 +214,7 @@ export default function ControlCenterPage() {
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Configure 4-Pillar scanner thresholds, L2 Bid Wall filters & global signal gates
+              Configure 4-Pillar scanner thresholds, L2 Bid Wall filters &amp; active strategy gates
             </p>
           </div>
         </div>
@@ -162,13 +246,13 @@ export default function ControlCenterPage() {
         onSubmit={handleSave}
         className="grid grid-cols-1 gap-4 lg:grid-cols-12"
       >
-        {/* Left Column (7 cols): Core Quantitative Thresholds */}
+        {/* Left Column (7 cols): Core Quantitative Thresholds + Active Strategy Filters */}
         <div className="space-y-4 lg:col-span-7">
           <div className="rounded-2xl border border-slate-800/90 bg-slate-900/60 p-5 backdrop-blur-xl space-y-5">
             <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
               <Sliders className="h-4 w-4 text-cyan-400" />
               <h2 className="text-sm font-bold uppercase tracking-wider text-white">
-                4-Pillar & Order Book Thresholds
+                4-Pillar &amp; Order Book Thresholds
               </h2>
             </div>
 
@@ -180,7 +264,7 @@ export default function ControlCenterPage() {
                     Minimum 4-Pillar Signal Score (Global Gate)
                   </label>
                   <p className="text-[11px] text-slate-400">
-                    Signals below this score are blocked in both Scanner & Signals Grid
+                    Signals below this score are blocked in both Scanner &amp; Signals Grid
                   </p>
                 </div>
                 <span className="rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-1 font-mono text-base font-black text-cyan-300">
@@ -275,6 +359,120 @@ export default function ControlCenterPage() {
               </div>
             </div>
           </div>
+
+          {/* Active Strategy Filters Section */}
+          <div className="rounded-2xl border border-slate-800/90 bg-slate-900/60 p-5 backdrop-blur-xl space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <Filter className="h-4 w-4 text-cyan-400" />
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">
+                    Active Strategy Filters
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Disabled timeframes &amp; patterns are skipped by Alpha &amp; Spot scanners, DB, Telegram, and WebSockets
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleEnableAllStrategies}
+                className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-bold text-cyan-300 transition hover:bg-cyan-500/20"
+              >
+                Enable All
+              </button>
+            </div>
+
+            {/* Timeframes Grid */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-300">
+                  <Clock className="h-3.5 w-3.5 text-cyan-400" />
+                  <span>Enabled Timeframes</span>
+                </span>
+                <span className="font-mono text-[11px] font-semibold text-cyan-300">
+                  {formData.enabled_timeframes.length} / {ALL_TIMEFRAMES.length} Active
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                {ALL_TIMEFRAMES.map((tf) => {
+                  const checked = formData.enabled_timeframes.includes(tf);
+                  return (
+                    <label
+                      key={tf}
+                      className={`flex cursor-pointer items-center justify-between rounded-xl border px-3.5 py-2.5 transition ${
+                        checked
+                          ? "border-cyan-500/50 bg-cyan-500/15 text-white shadow-[0_0_15px_rgba(6,182,212,0.12)]"
+                          : "border-slate-800 bg-[#080B12]/70 text-slate-500 hover:border-slate-700"
+                      }`}
+                    >
+                      <span className="font-mono text-xs font-black uppercase">
+                        {tf}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => handleToggleTimeframe(tf)}
+                        className="h-4 w-4 rounded accent-cyan-400"
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Patterns Grid */}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-300">
+                  <Layers className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Enabled Chart &amp; Quant Patterns (Alpha + Spot)</span>
+                </span>
+                <span className="font-mono text-[11px] font-semibold text-emerald-300">
+                  {formData.enabled_patterns.length} / {ALL_PATTERNS.length} Active
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {ALL_PATTERNS.map((pattern) => {
+                  const checked = formData.enabled_patterns.includes(pattern);
+                  const isSpotQuant = SPOT_QUANT_PATTERNS.has(pattern);
+                  return (
+                    <label
+                      key={pattern}
+                      className={`flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 transition ${
+                        checked
+                          ? "border-emerald-500/45 bg-emerald-500/10 text-white"
+                          : "border-slate-800 bg-[#080B12]/70 text-slate-500 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate text-xs font-bold">
+                            {formatPatternName(pattern)}
+                          </span>
+                          <span
+                            className={`shrink-0 rounded border px-1.5 py-0.2 font-mono text-[9px] font-bold uppercase ${
+                              isSpotQuant
+                                ? "border-purple-500/30 bg-purple-500/15 text-purple-300"
+                                : "border-cyan-500/30 bg-cyan-500/15 text-cyan-300"
+                            }`}
+                          >
+                            {isSpotQuant ? "Spot" : "Alpha"}
+                          </span>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => handleTogglePattern(pattern)}
+                        className="h-4 w-4 shrink-0 rounded accent-emerald-400"
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Right Column (5 cols): Smart Filters & Alert Pacing */}
@@ -284,7 +482,7 @@ export default function ControlCenterPage() {
             <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
               <ShieldCheck className="h-4 w-4 text-emerald-400" />
               <h2 className="text-sm font-bold uppercase tracking-wider text-white">
-                Strategy Guards & SMC Engine
+                Strategy Guards &amp; SMC Engine
               </h2>
             </div>
 
@@ -293,7 +491,7 @@ export default function ControlCenterPage() {
               <div className="pr-3">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-white">
                   <Sparkles className="h-3.5 w-3.5 text-purple-400" />
-                  <span>Smart Money Concepts (BoS & Order Blocks)</span>
+                  <span>Smart Money Concepts (BoS &amp; Order Blocks)</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-slate-400">
                   Boosts Pillar-3 score when institutional Break of Structure aligns
@@ -312,7 +510,7 @@ export default function ControlCenterPage() {
               <div className="pr-3">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-white">
                   <Cpu className="h-3.5 w-3.5 text-cyan-400" />
-                  <span>Anti-Spoof & Dead-Cat Bounce Filter</span>
+                  <span>Anti-Spoof &amp; Dead-Cat Bounce Filter</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-slate-400">
                   Penalizes coins with &lt;45% wall respect rate or dumped macro structure
@@ -373,7 +571,7 @@ export default function ControlCenterPage() {
             <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
               <Bell className="h-4 w-4 text-amber-400" />
               <h2 className="text-sm font-bold uppercase tracking-wider text-white">
-                Alert Pacing & Cooldown
+                Alert Pacing &amp; Cooldown
               </h2>
             </div>
 

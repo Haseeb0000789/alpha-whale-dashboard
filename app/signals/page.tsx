@@ -181,7 +181,22 @@ export default function SignalsGridPage() {
 
   // Always show authentic live Spot signals — never inject hardcoded fake trade setups
   const activeSpotPool = useMemo(() => wsSpotSignals ?? [], [wsSpotSignals]);
-  const baseDataset = marketTab === "ALPHA" ? signals : activeSpotPool;
+  const rawDataset = marketTab === "ALPHA" ? signals : activeSpotPool;
+
+  // Enforce Control Panel Active Strategy Filters (enabled_timeframes & enabled_patterns) in 0ms
+  const baseDataset = useMemo(() => {
+    const enabledTfs = settings?.enabled_timeframes;
+    const enabledPats = settings?.enabled_patterns;
+    return rawDataset.filter((s) => {
+      if (Array.isArray(enabledTfs) && !enabledTfs.includes(s.timeframe)) {
+        return false;
+      }
+      if (Array.isArray(enabledPats) && !enabledPats.includes(s.structure)) {
+        return false;
+      }
+      return true;
+    });
+  }, [rawDataset, settings?.enabled_timeframes, settings?.enabled_patterns]);
 
   // Update relative-time clock on mount + 30s interval instead of every 2.5s WS tick
   useEffect(() => {
@@ -368,7 +383,7 @@ export default function SignalsGridPage() {
   };
 
   return (
-    <main className="mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6 pb-20">
+    <main className="mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6 pb-32 md:pb-24">
       {/* 0. MARKET ENGINE SWITCHER TABS: Binance Alpha vs Main CEX Spot (Scalp & Swing) */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800/90 bg-slate-900/75 p-2 backdrop-blur-xl">
         <div className="flex flex-wrap items-center gap-2">
@@ -939,7 +954,7 @@ export default function SignalsGridPage() {
       <button
         onClick={triggerRefresh}
         aria-label="Refresh Signals"
-        className="fixed bottom-6 right-5 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/50 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-lg md:hidden"
+        className="fixed bottom-24 right-5 md:bottom-6 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/50 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-lg md:hidden"
       >
         <RefreshCw className="h-5 w-5" />
       </button>

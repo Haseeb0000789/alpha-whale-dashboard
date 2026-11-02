@@ -81,16 +81,24 @@ export interface BidWall {
   last_seen_at?: string;
 }
 
-// NAYA: Stats breakdown interfaces (Telegram /stats mapping)
+// NAYA: Stats breakdown interfaces (Telegram /stats & 7D Granular Win-Rate mapping)
 export interface PatternStatItem {
   structure: string;
   count: number;
-  avg_confidence: number;
+  avg_confidence?: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  win_rate_pct: number;
 }
 
 export interface TimeframeStatItem {
   timeframe: string;
   count: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  win_rate_pct: number;
 }
 
 // UPDATED: SignalStats interface

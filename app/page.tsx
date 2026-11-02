@@ -38,7 +38,7 @@ export default function DashboardOverviewPage() {
   }, [walls, signals, spotSignals]);
 
   return (
-    <main className="mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6">
+    <main className="mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6 pb-32 md:pb-24">
       <StatsCards
         stats={stats}
         signalsTodayCount={signalsTodayCount}
@@ -107,7 +107,7 @@ export default function DashboardOverviewPage() {
       <button
         onClick={triggerRefresh}
         aria-label="Refresh Data"
-        className="fixed bottom-5 right-5 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-cyan-400/50 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-lg md:hidden"
+        className="fixed bottom-24 right-5 md:bottom-6 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-cyan-400/50 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-lg md:hidden"
       >
         <RefreshCw className="h-4 w-4" />
       </button>
