@@ -6,6 +6,7 @@ import Link from "next/link";
 import StatsCards from "@/components/StatsCards";
 import AnalyticsCharts from "@/components/AnalyticsCharts";
 import { useDashboardSocket } from "@/context/DashboardSocketContext";
+import { getSyncedNowMs, parseUtcTimestampMs } from "@/types/types";
 import { Zap, Shield, ArrowUpRight } from "lucide-react";
 
 export default function DashboardOverviewPage() {
@@ -15,18 +16,20 @@ export default function DashboardOverviewPage() {
 
   useEffect(() => {
     const initId = setTimeout(() => {
-      const now = new Date();
+      const now = new Date(getSyncedNowMs());
       now.setHours(0, 0, 0, 0);
       setStartOfDay(now);
     }, 0);
     return () => clearTimeout(initId);
-  }, []);
+  }, [signals.length]);
 
   const signalsTodayCount = useMemo(() => {
     if (!startOfDay) return 0;
-    return signals.filter((s) =>
-      s.detected_at ? new Date(s.detected_at) >= startOfDay : false
-    ).length;
+    const startMs = startOfDay.getTime();
+    return signals.filter((s) => {
+      const ts = parseUtcTimestampMs(s.detected_at);
+      return !isNaN(ts) && ts >= startMs;
+    }).length;
   }, [signals, startOfDay]);
 
   const activeCoinsCount = useMemo(() => {

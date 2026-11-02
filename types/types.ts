@@ -198,11 +198,70 @@ export function formatPatternName(structure: string): string {
     .join(" ");
 }
 
-export function formatRelativeTime(isoDate: string | undefined): string {
+let serverClockOffsetMs = 0;
+
+/**
+ * Parse an ISO-8601 timestamp strictly as UTC even if PostgreSQL/Python serialized
+ * a timezone-naive UTC datetime without a trailing "Z" or "+00:00".
+ */
+export function parseUtcTimestampMs(isoDate: string | undefined | null): number {
+  if (!isoDate) return NaN;
+  const trimmed = isoDate.trim();
+  if (!trimmed) return NaN;
+  const hasExplicitZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(trimmed);
+  const normalized = hasExplicitZone
+    ? trimmed
+    : `${trimmed.replace(" ", "T")}Z`;
+  return new Date(normalized).getTime();
+}
+
+/**
+ * Synchronize client clock offset with backend UTC server time (or latest signal/wall timestamp)
+ * so relative ages ("14m ago", "2h ago") are 100% accurate even when the user's PC clock is out of sync.
+ */
+export function syncServerClock(
+  serverIso?: string | null,
+  items?: Array<{ detected_at?: string; last_seen?: string }>
+): void {
+  const localNow = Date.now();
+  if (serverIso) {
+    const serverMs = parseUtcTimestampMs(serverIso);
+    if (!isNaN(serverMs) && serverMs > 0) {
+      serverClockOffsetMs = serverMs - localNow;
+      return;
+    }
+  }
+  if (Array.isArray(items) && items.length > 0) {
+    let maxItemMs = 0;
+    for (const item of items) {
+      const ts = parseUtcTimestampMs(item.detected_at || item.last_seen);
+      if (!isNaN(ts) && ts > maxItemMs) {
+        maxItemMs = ts;
+      }
+    }
+    if (maxItemMs > localNow + serverClockOffsetMs) {
+      serverClockOffsetMs = maxItemMs - localNow;
+    }
+  }
+}
+
+export function getSyncedNowMs(): number {
+  return Date.now() + serverClockOffsetMs;
+}
+
+export function formatRelativeTime(
+  isoDate: string | undefined,
+  referenceNowMs?: number
+): string {
   if (!isoDate) return "Just now";
-  const date = new Date(isoDate);
-  if (isNaN(date.getTime())) return "Just now";
-  const diffSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  const dateMs = parseUtcTimestampMs(isoDate);
+  if (isNaN(dateMs)) return "Just now";
+  const syncedNow = getSyncedNowMs();
+  const effectiveNow =
+    referenceNowMs && referenceNowMs > 0
+      ? Math.max(referenceNowMs, syncedNow)
+      : syncedNow;
+  const diffSeconds = Math.max(0, Math.floor((effectiveNow - dateMs) / 1000));
 
   if (diffSeconds < 60) return `${diffSeconds}s ago`;
   const diffMinutes = Math.floor(diffSeconds / 60);

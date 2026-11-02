@@ -12,6 +12,9 @@ import {
   TimeframeFilter,
   formatCryptoPrice,
   formatPatternName,
+  formatRelativeTime,
+  getSyncedNowMs,
+  parseUtcTimestampMs,
 } from "@/types/types";
 import {
   Search,
@@ -57,15 +60,7 @@ type OutcomeFilter = "ALL" | "IN_PLAY" | "TP_HIT" | "BREAKEVEN" | "SL_HIT";
 
 function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): string {
   if (!isoDate || nowMs <= 0) return "Live now";
-  const dateMs = new Date(isoDate).getTime();
-  if (isNaN(dateMs)) return "Live now";
-  const diffSeconds = Math.max(0, Math.floor((nowMs - dateMs) / 1000));
-  if (diffSeconds < 60) return `${diffSeconds}s ago`;
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ${diffMinutes % 60}m ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
+  return formatRelativeTime(isoDate, nowMs);
 }
 
 function ScoreCircleBadge({ score }: { score: number }) {
@@ -198,15 +193,15 @@ export default function SignalsGridPage() {
     });
   }, [rawDataset, settings?.enabled_timeframes, settings?.enabled_patterns]);
 
-  // Update relative-time clock on mount + 30s interval instead of every 2.5s WS tick
+  // Update relative-time clock on mount + when signals arrive + 30s interval
   useEffect(() => {
-    const initId = setTimeout(() => setNowMs(Date.now()), 0);
-    const id = setInterval(() => setNowMs(Date.now()), 30000);
+    const initId = setTimeout(() => setNowMs(getSyncedNowMs()), 0);
+    const id = setInterval(() => setNowMs(getSyncedNowMs()), 30000);
     return () => {
       clearTimeout(initId);
       clearInterval(id);
     };
-  }, []);
+  }, [rawDataset.length]);
 
   const outcomeCounts = useMemo(() => {
     let inPlay = 0;
@@ -295,11 +290,11 @@ export default function SignalsGridPage() {
     return [...list].sort((a, b) => {
       const symA = a.symbol.trim().toUpperCase();
       const symB = b.symbol.trim().toUpperCase();
-      const timeA = a.detected_at ? new Date(a.detected_at).getTime() : 0;
-      const timeB = b.detected_at ? new Date(b.detected_at).getTime() : 0;
+      const timeA = parseUtcTimestampMs(a.detected_at) || 0;
+      const timeB = parseUtcTimestampMs(b.detected_at) || 0;
 
       if (sortMode === "relevance") {
-        const refNow = nowMs > 0 ? nowMs : Math.max(timeA, timeB);
+        const refNow = Math.max(nowMs, getSyncedNowMs(), timeA, timeB);
         const ageHoursA = Math.max(0, (refNow - timeA) / 3600000);
         const ageHoursB = Math.max(0, (refNow - timeB) / 3600000);
 
@@ -779,10 +774,17 @@ export default function SignalsGridPage() {
                 const entryVal =
                   sig.entry_high || sig.breakout_price || sig.entry_low;
 
+                const effectiveNowMs = Math.max(nowMs, getSyncedNowMs());
+                const sigTimeMs = parseUtcTimestampMs(sig.detected_at);
+                const sigAgeMs = !isNaN(sigTimeMs) ? effectiveNowMs - sigTimeMs : Infinity;
+                const isStillInPlay =
+                  (sig.outcome_status || "IN_PLAY") === "IN_PLAY" &&
+                  !sig.outcome_finalized;
                 const isFresh =
                   nowMs > 0 &&
-                  Boolean(sig.detected_at) &&
-                  nowMs - new Date(sig.detected_at!).getTime() < 3600000;
+                  isStillInPlay &&
+                  sigAgeMs >= 0 &&
+                  sigAgeMs < 3600000;
 
                 const isSpotCard = marketTab === "SPOT" || sig.market_type === "SPOT";
                 const tradeStyle =

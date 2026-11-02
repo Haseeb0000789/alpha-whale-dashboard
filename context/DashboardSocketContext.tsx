@@ -11,7 +11,7 @@ import React, {
   useMemo,
   useTransition,
 } from "react";
-import { Signal, SignalStats, BidWall } from "@/types/types";
+import { Signal, SignalStats, BidWall, syncServerClock } from "@/types/types";
 
 export const ALL_TIMEFRAMES = ["15m", "1h", "4h", "1d"];
 
@@ -296,6 +296,8 @@ export function DashboardSocketProvider({
         const parsedSignals: Signal[] = Array.isArray(sigData)
           ? sigData
           : sigData.signals || [];
+        const serverDateHeader = sigRes.headers.get("date");
+        syncServerClock(serverDateHeader, parsedSignals);
         knownAlphaKeysRef.current = new Set(parsedSignals.map(signalIdentityKey));
         hasSeededAlphaRef.current = true;
         setSignals(parsedSignals);
@@ -365,6 +367,10 @@ export function DashboardSocketProvider({
           }
 
           if (payload.type === "snapshot") {
+            syncServerClock(
+              payload.timestamp,
+              Array.isArray(payload.signals) ? payload.signals : undefined
+            );
             // Check for genuinely new high-score (>=75) Alpha signals
             if (Array.isArray(payload.signals)) {
               const incomingAlpha: Signal[] = payload.signals;

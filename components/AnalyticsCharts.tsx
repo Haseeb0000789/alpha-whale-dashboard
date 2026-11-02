@@ -7,6 +7,8 @@ import {
   SignalStats,
   EquityCurvePoint,
   formatPatternName,
+  getSyncedNowMs,
+  parseUtcTimestampMs,
 } from "@/types/types";
 import {
   ResponsiveContainer,
@@ -53,9 +55,9 @@ export default function AnalyticsCharts({
   const [mountedDate, setMountedDate] = useState<Date | null>(null);
 
   useEffect(() => {
-    const initId = setTimeout(() => setMountedDate(new Date()), 0);
+    const initId = setTimeout(() => setMountedDate(new Date(getSyncedNowMs())), 0);
     return () => clearTimeout(initId);
-  }, []);
+  }, [signals.length]);
 
   const chartData: EquityCurvePoint[] = useMemo(() => {
     const baseWinRate =
@@ -91,8 +93,9 @@ export default function AnalyticsCharts({
 
     for (const s of signals) {
       if (!s.detected_at) continue;
-      const dt = new Date(s.detected_at);
-      if (isNaN(dt.getTime())) continue;
+      const dtMs = parseUtcTimestampMs(s.detected_at);
+      if (isNaN(dtMs)) continue;
+      const dt = new Date(dtMs);
       const b = buckets.get(localDayKey(dt));
       if (!b) continue;
 

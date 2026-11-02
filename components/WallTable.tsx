@@ -4,7 +4,12 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { BidWall, formatCryptoPrice } from "@/types/types";
+import {
+  BidWall,
+  formatCryptoPrice,
+  formatRelativeTime,
+  getSyncedNowMs,
+} from "@/types/types";
 import { WallCardsSkeleton } from "./Skeletons";
 import {
   Shield,
@@ -33,16 +38,7 @@ function normalizeRespectPct(raw?: number): number {
 
 function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): string {
   if (!isoDate || nowMs <= 0) return "0s ago";
-  const dateMs = new Date(isoDate).getTime();
-  if (isNaN(dateMs)) return "0s ago";
-  const diffSeconds = Math.max(0, Math.floor((nowMs - dateMs) / 1000));
-
-  if (diffSeconds < 60) return `${diffSeconds}s ago`;
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ${diffMinutes % 60}m ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
+  return formatRelativeTime(isoDate, nowMs);
 }
 
 export default function WallTable({
@@ -55,13 +51,13 @@ export default function WallTable({
 
   // Update relative-time clock on mount + 30s interval (never thrash on every 2.5s WS tick)
   useEffect(() => {
-    const initId = setTimeout(() => setNowMs(Date.now()), 0);
-    const id = setInterval(() => setNowMs(Date.now()), 30000);
+    const initId = setTimeout(() => setNowMs(getSyncedNowMs()), 0);
+    const id = setInterval(() => setNowMs(getSyncedNowMs()), 30000);
     return () => {
       clearTimeout(initId);
       clearInterval(id);
     };
-  }, []);
+  }, [walls.length]);
 
   const sortedWalls = useMemo(() => {
     const map = new Map<string, BidWall>();
