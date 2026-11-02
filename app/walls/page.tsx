@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import WallTable from "@/components/WallTable";
 import DepthChart from "@/components/DepthChart";
 import {
@@ -10,12 +11,12 @@ import {
 } from "@/context/DashboardSocketContext";
 import { DepthPoint } from "@/types/types";
 import {
-  Shield,
-  Flame,
   RefreshCw,
   Search,
-  DollarSign,
-  CheckCircle2,
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  X,
 } from "lucide-react";
 
 export default function LiveWallsPage() {
@@ -23,13 +24,13 @@ export default function LiveWallsPage() {
     useDashboardSocket();
   const [searchSymbol, setSearchSymbol] = useState<string>("");
   const [selectedWallSymbol, setSelectedWallSymbol] = useState<string>("");
+  const [showDepthDrawer, setShowDepthDrawer] = useState<boolean>(false);
   const [fetchedDepthState, setFetchedDepthState] = useState<{
     symbol: string;
     depth?: DepthPoint[];
     bidAskRatio?: number | null;
   } | null>(null);
 
-  // Active minimum wall threshold + proximity gate from Control Center
   const minWallUsd = settings?.min_wall_usd ?? 5000;
   const maxProximityPct = settings?.proximity_pct ?? 1.5;
 
@@ -46,7 +47,6 @@ export default function LiveWallsPage() {
         if (w.exchange_walls && w.exchange_walls.length > 0) {
           const validExWalls = w.exchange_walls
             .map((ew) => {
-              // Recalculate true distance % against the coin's single mid_price
               const trueDist =
                 canonicalMid > ew.price
                   ? Number(
@@ -118,16 +118,6 @@ export default function LiveWallsPage() {
       });
   }, [walls, minWallUsd, maxProximityPct, searchSymbol]);
 
-  const totalBidLiquidityUsd = useMemo(
-    () => filteredWalls.reduce((acc, w) => acc + (w.usd_value || 0), 0),
-    [filteredWalls]
-  );
-
-  const megaWhaleCount = useMemo(
-    () => filteredWalls.filter((w) => w.usd_value > 50000).length,
-    [filteredWalls]
-  );
-
   const focusedWall = useMemo(() => {
     if (selectedWallSymbol) {
       const found = filteredWalls.find(
@@ -148,9 +138,8 @@ export default function LiveWallsPage() {
       ? fetchedDepthState.bidAskRatio
       : undefined;
 
-  // Fetch real L2 cumulative depth for whichever wall token is focused
   useEffect(() => {
-    if (!focusedSym) return;
+    if (!focusedSym || !showDepthDrawer) return;
 
     let active = true;
 
@@ -183,133 +172,106 @@ export default function LiveWallsPage() {
       active = false;
       clearInterval(timer);
     };
-  }, [focusedSym]);
+  }, [focusedSym, showDepthDrawer]);
+
+  const handleSelectWallSymbol = (sym: string) => {
+    setSelectedWallSymbol(sym);
+    setShowDepthDrawer(true);
+  };
 
   return (
-    <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-3 sm:px-6 pb-16">
-      {/* Sleek 3-Card Top Strip */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="relative flex items-center justify-between overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md">
-          <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent opacity-80" />
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
-              <DollarSign className="h-4 w-4" />
-            </div>
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Tracked Depth (&ge;${minWallUsd.toLocaleString()})
-              </span>
-              <span className="text-[10px] text-slate-500">
-                Alpha • KuCoin • Bitget • MEXC • OKX
-              </span>
-            </div>
-          </div>
-          <p className="font-mono text-lg font-black text-emerald-400 sm:text-xl">
-            $
-            {totalBidLiquidityUsd.toLocaleString("en-US", {
-              maximumFractionDigits: 0,
-            })}
-          </p>
+    <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-3 sm:px-6 pb-20">
+      {/* Ultra-Slim Top Header: Total Count, Collapsible Depth Toggle, Small Search Input & Refresh */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-lg border border-[#2B3139] bg-[#161A1E] px-3.5 py-2">
+        <div className="flex items-center gap-2.5">
+          <h1 className="text-xs font-bold uppercase tracking-wider text-white sm:text-sm">
+            Live Bid Walls
+          </h1>
+          <span className="rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-xs font-bold text-emerald-400">
+            {filteredWalls.length} Active
+          </span>
         </div>
 
-        <div className="relative flex items-center justify-between overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md">
-          <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-amber-400/80 to-transparent opacity-80" />
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400">
-              <Flame className="h-4 w-4" />
-            </div>
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Mega Whale Walls (&gt;$50K)
-              </span>
-              <span className="text-[10px] text-slate-500">
-                Institutional price floors
-              </span>
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <p className="font-mono text-xl font-black text-white sm:text-2xl">
-              {megaWhaleCount}
-            </p>
-            <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
-              Active
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowDepthDrawer((prev) => !prev)}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors ${
+              showDepthDrawer
+                ? "border-emerald-500/40 bg-[#2B3139] text-white"
+                : "border-[#2B3139] bg-[#1E2329] text-slate-300 hover:border-slate-600 hover:text-white"
+            }`}
+          >
+            <BarChart3 className="h-3.5 w-3.5 text-emerald-400" />
+            <span>
+              L2 Depth {focusedSym ? `(${focusedSym})` : ""}
             </span>
+            {showDepthDrawer ? (
+              <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+            )}
+          </button>
+
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              value={searchSymbol}
+              onChange={(e) => setSearchSymbol(e.target.value)}
+              placeholder="Search token..."
+              className="w-36 rounded-md border border-[#2B3139] bg-[#0B0E11] py-1 pl-8 pr-2.5 text-xs text-white placeholder-slate-500 focus:border-slate-500 focus:outline-none sm:w-44"
+            />
           </div>
+
+          <button
+            onClick={triggerRefresh}
+            title="Refresh Live Walls"
+            className="inline-flex items-center justify-center rounded-md border border-[#2B3139] bg-[#1E2329] p-1.5 text-slate-300 transition hover:border-slate-600 hover:text-white"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
         </div>
+      </div>
 
-        <div className="relative flex items-center justify-between gap-3 overflow-hidden rounded-xl border border-slate-800/90 bg-gradient-to-r from-slate-900/90 via-[#0B0F19] to-[#080B12] px-4 py-2.5 shadow-md">
-          <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent opacity-80" />
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
-              <Shield className="h-4 w-4" />
-            </div>
-            <span className="hidden text-[10px] font-bold uppercase tracking-wider text-slate-400 xl:block">
-              Min ${minWallUsd.toLocaleString()} • ≤{maxProximityPct.toFixed(1)}%
-            </span>
-          </div>
-
-          <div className="flex flex-1 items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={searchSymbol}
-                onChange={(e) => setSearchSymbol(e.target.value)}
-                placeholder="Search wall token..."
-                className="w-full rounded-lg border border-slate-700/60 bg-[#07090E] py-1.5 pl-8 pr-3 text-xs text-white placeholder-slate-500 focus:border-emerald-500/50 focus:outline-none"
+      {/* Collapsible Top L2 Depth Chart Drawer (Never squeezes the full-width walls grid) */}
+      <AnimatePresence initial={false}>
+        {showDepthDrawer && focusedWall && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+          >
+            <div className="relative rounded-lg border border-[#2B3139] bg-[#161A1E] p-3">
+              <button
+                onClick={() => setShowDepthDrawer(false)}
+                title="Close Depth Chart"
+                className="absolute right-3 top-3 z-10 rounded-md border border-[#2B3139] bg-[#1E2329] p-1 text-slate-400 hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+              <DepthChart
+                symbol={focusedWall.symbol}
+                midPrice={focusedWall.mid_price || focusedWall.price * 1.005}
+                wallPrice={focusedWall.price}
+                wallUsd={focusedWall.usd_value}
+                depthData={liveDepth}
+                bidAskRatio={liveBidAskRatio}
+                height={260}
               />
             </div>
-            <button
-              onClick={triggerRefresh}
-              title="Instant WebSocket Sync"
-              className="rounded-lg border border-white/10 bg-white/[0.04] p-1.5 text-slate-200 transition hover:border-emerald-500/40 hover:text-emerald-300"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
-        <div className="lg:col-span-7">
-          <WallTable
-            walls={filteredWalls}
-            isLoading={isInitialLoading}
-            onSelectSymbol={(sym) => setSelectedWallSymbol(sym)}
-          />
-        </div>
-
-        <div className="space-y-3 lg:sticky lg:top-20 lg:col-span-5">
-          <DepthChart
-            symbol={focusedWall ? focusedWall.symbol : ""}
-            midPrice={
-              focusedWall
-                ? focusedWall.mid_price || focusedWall.price * 1.005
-                : 0
-            }
-            wallPrice={focusedWall?.price}
-            wallUsd={focusedWall?.usd_value}
-            depthData={liveDepth}
-            bidAskRatio={liveBidAskRatio}
-            height={320}
-          />
-
-          <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 px-4 py-3 text-xs text-slate-300">
-            <div className="flex items-center gap-2 font-bold text-white">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-              <span>How to Trade Bid Wall Setups</span>
-            </div>
-            <p className="mt-1 leading-relaxed text-slate-400">
-              Click any wall card on the left to inspect its live L2 cumulative
-              Bid vs. Ask imbalance curve above. Look for tokens with{" "}
-              <strong className="text-emerald-300">&gt;70% Respect Rate</strong>{" "}
-              and <strong className="text-cyan-300">&gt;1.3x Bid/Ask Ratio</strong>{" "}
-              (Ask Vacuum) for low-risk spot scalps.
-            </p>
-          </div>
-        </div>
-      </div>
+      {/* Primary Focus: Full-Width 3-Column Grid of Walls */}
+      <WallTable
+        walls={filteredWalls}
+        isLoading={isInitialLoading}
+        selectedSymbol={focusedSym}
+        onSelectSymbol={handleSelectWallSymbol}
+      />
     </main>
   );
 }

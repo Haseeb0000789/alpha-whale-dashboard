@@ -8,7 +8,7 @@ import { DashboardSocketProvider } from "@/context/DashboardSocketContext";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Alpha Whale Scanner | 4-Pillar Spot & L2 Order Book Terminal",
+  title: "Alpha Terminal | Spot & Order Book Trading Terminal",
   description:
     "Real-time cryptocurrency breakout signals, Smart Money Concepts, and whale bid wall tracking.",
 };
@@ -21,15 +21,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${inter.className} min-h-screen bg-[#07090E] text-slate-100 antialiased selection:bg-cyan-500/30 selection:text-cyan-200`}
+        className={`${inter.className} min-h-screen bg-[#0B0E11] text-slate-100 antialiased selection:bg-white/20 selection:text-white`}
       >
         <DashboardSocketProvider>
-          {/* Ambient Background Glows */}
-          <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-            <div className="absolute -left-40 -top-40 h-96 w-96 rounded-full bg-emerald-500/[0.05] blur-[140px]" />
-            <div className="absolute right-0 top-20 h-96 w-96 rounded-full bg-cyan-500/[0.05] blur-[140px]" />
-          </div>
-
           {/* Sticky Global Navigation Bar */}
           <Navbar />
 
