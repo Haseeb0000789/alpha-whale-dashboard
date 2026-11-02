@@ -20,33 +20,80 @@ export default function LiveWallsPage() {
   const [searchSymbol, setSearchSymbol] = useState<string>("");
   const [selectedWallSymbol, setSelectedWallSymbol] = useState<string>("");
 
-  // Active minimum wall threshold from Control Center (default $5,000)
+  // Active minimum wall threshold + proximity gate from Control Center
   const minWallUsd = settings?.min_wall_usd ?? 5000;
+  const maxProximityPct = settings?.proximity_pct ?? 1.5;
 
   const filteredWalls = useMemo(() => {
     return walls
       .map((w) => {
-        // Also filter sub-exchange walls so no <$5k bullet point ever appears
-        const validExWalls = (w.exchange_walls || []).filter(
-          (ew) => ew.usd_value >= minWallUsd
-        );
+        const canonicalMid =
+          w.mid_price && w.mid_price > w.price
+            ? w.mid_price
+            : w.price * (1 + (w.distance_pct ?? 0.4) / 100);
+
         if (w.exchange_walls && w.exchange_walls.length > 0) {
+          const validExWalls = w.exchange_walls
+            .map((ew) => {
+              // Recalculate true distance % against the coin's single mid_price!
+              const trueDist =
+                canonicalMid > ew.price
+                  ? Number(
+                      (((canonicalMid - ew.price) / canonicalMid) * 100).toFixed(2)
+                    )
+                  : -1;
+              return {
+                ...ew,
+                distance_pct: trueDist,
+              };
+            })
+            .filter(
+              (ew) =>
+                ew.usd_value >= minWallUsd &&
+                ew.price < canonicalMid &&
+                ew.distance_pct >= 0.01 &&
+                ew.distance_pct <= maxProximityPct
+            );
+
           if (validExWalls.length === 0) return null;
+          validExWalls.sort((a, b) => a.distance_pct - b.distance_pct);
+
           const newTotal = validExWalls.reduce(
             (sum, ew) => sum + ew.usd_value,
             0
           );
           return {
             ...w,
+            mid_price: canonicalMid,
+            price: validExWalls[0].price,
+            exchange: validExWalls[0].exchange,
+            distance_pct: validExWalls[0].distance_pct,
             usd_value: newTotal,
             exchange_walls: validExWalls,
           };
         }
-        return w.usd_value >= minWallUsd ? w : null;
+
+        const singleDist =
+          canonicalMid > w.price
+            ? Number((((canonicalMid - w.price) / canonicalMid) * 100).toFixed(2))
+            : -1;
+
+        if (
+          w.usd_value < minWallUsd ||
+          singleDist < 0.01 ||
+          singleDist > maxProximityPct
+        ) {
+          return null;
+        }
+
+        return {
+          ...w,
+          mid_price: canonicalMid,
+          distance_pct: singleDist,
+        };
       })
       .filter((w): w is NonNullable<typeof w> => {
         if (!w) return false;
-        if (w.usd_value < minWallUsd) return false;
         const sym = w.symbol.trim().toUpperCase();
         if (
           searchSymbol.trim() &&
@@ -56,7 +103,7 @@ export default function LiveWallsPage() {
         }
         return true;
       });
-  }, [walls, minWallUsd, searchSymbol]);
+  }, [walls, minWallUsd, maxProximityPct, searchSymbol]);
 
   const totalBidLiquidityUsd = useMemo(
     () => filteredWalls.reduce((acc, w) => acc + (w.usd_value || 0), 0),
@@ -144,7 +191,7 @@ export default function LiveWallsPage() {
               <Shield className="h-4 w-4" />
             </div>
             <span className="hidden text-[10px] font-bold uppercase tracking-wider text-slate-400 xl:block">
-              Min ${minWallUsd.toLocaleString()}
+              Min ${minWallUsd.toLocaleString()} • ≤{maxProximityPct.toFixed(1)}%
             </span>
           </div>
 
