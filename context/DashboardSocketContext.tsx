@@ -8,6 +8,7 @@ import React, {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   useTransition,
 } from "react";
 import { Signal, SignalStats, BidWall } from "@/types/types";
@@ -71,7 +72,8 @@ export function resolveApiBase(): string {
     return process.env.NEXT_PUBLIC_API_URL;
   }
   if (typeof window !== "undefined") {
-    return `http://${window.location.hostname}:8000`;
+    const proto = window.location.protocol === "https:" ? "https:" : "http:";
+    return `${proto}//${window.location.hostname}:8000`;
   }
   return "http://localhost:8000";
 }
@@ -79,6 +81,13 @@ export function resolveApiBase(): string {
 function resolveWsUrl(): string {
   const base = resolveApiBase();
   return base.replace(/^http/, "ws") + "/ws/dashboard";
+}
+
+function signalIdentityKey(sig: Signal): string {
+  if (sig.id !== undefined && sig.id !== null) {
+    return `id:${sig.id}`;
+  }
+  return `${(sig.symbol || "").trim().toUpperCase()}:${sig.timeframe || ""}:${sig.detected_at || ""}`;
 }
 
 export function DashboardSocketProvider({
@@ -96,25 +105,36 @@ export function DashboardSocketProvider({
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  const settingsRef = useRef<BotSettings>(DEFAULT_SETTINGS);
   const [, startTransition] = useTransition();
 
-  // --- AUDIO ALARM SETUP (Safari & Mobile Fix) ---
+  // --- AUDIO ALARM SETUP (Safari & Mobile Fix + Audio Toggle & 75+ Score Gate) ---
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const prevSignalsCountRef = useRef(0);
-  const prevSpotSignalsCountRef = useRef(0);
+  const knownAlphaKeysRef = useRef<Set<string>>(new Set());
+  const knownSpotKeysRef = useRef<Set<string>>(new Set());
+  const hasSeededAlphaRef = useRef<boolean>(false);
+  const hasSeededSpotRef = useRef<boolean>(false);
+  const reconnectFnRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   useEffect(() => {
     const unlockAudio = () => {
       if (!audioCtxRef.current) {
-        const AudioContext =
-          window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContext) {
-          audioCtxRef.current = new AudioContext();
+        const AudioContextCtor =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+        if (AudioContextCtor) {
+          audioCtxRef.current = new AudioContextCtor();
         }
       }
       if (audioCtxRef.current?.state === "suspended") {
-        audioCtxRef.current.resume();
+        audioCtxRef.current.resume().catch(() => {});
       }
     };
 
@@ -127,7 +147,10 @@ export function DashboardSocketProvider({
     };
   }, []);
 
-  const playAlarm = useCallback(() => {
+  const playAlarm = useCallback((signalScore?: number) => {
+    if (!settingsRef.current.enable_audio) return;
+    if (signalScore !== undefined && signalScore < 75) return;
+
     if (audioCtxRef.current) {
       const ctx = audioCtxRef.current;
       const oscillator = ctx.createOscillator();
@@ -142,6 +165,15 @@ export function DashboardSocketProvider({
       oscillator.connect(gainNode);
       gainNode.connect(ctx.destination);
 
+      oscillator.onended = () => {
+        try {
+          oscillator.disconnect();
+          gainNode.disconnect();
+        } catch {
+          // Ignore disconnect errors
+        }
+      };
+
       oscillator.start();
       oscillator.stop(ctx.currentTime + 0.3);
     }
@@ -154,7 +186,11 @@ export function DashboardSocketProvider({
       const saved = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        setSettings((prev) => ({ ...prev, ...parsed }));
+        setSettings((prev) => {
+          const merged = { ...prev, ...parsed };
+          settingsRef.current = merged;
+          return merged;
+        });
       }
     } catch {
       // Ignore storage errors
@@ -173,10 +209,13 @@ export function DashboardSocketProvider({
         fetch(`${apiBase}/api/settings`, { cache: "no-store" }),
       ]);
 
+      if (!isMountedRef.current) return;
+
       if (setRes.ok) {
         const setJson = await setRes.json();
         setSettings((prev) => {
           const merged = { ...prev, ...setJson };
+          settingsRef.current = merged;
           try {
             localStorage.setItem(
               LOCAL_STORAGE_SETTINGS_KEY,
@@ -191,11 +230,12 @@ export function DashboardSocketProvider({
       if (spotRes.ok) {
         try {
           const spotData = await spotRes.json();
-          const parsedSpot = Array.isArray(spotData)
+          const parsedSpot: Signal[] = Array.isArray(spotData)
             ? spotData
             : spotData.signals || spotData.spot_signals || [];
-          if (Array.isArray(parsedSpot)) {
-            prevSpotSignalsCountRef.current = parsedSpot.length;
+          if (Array.isArray(parsedSpot) && isMountedRef.current) {
+            knownSpotKeysRef.current = new Set(parsedSpot.map(signalIdentityKey));
+            hasSeededSpotRef.current = true;
             setSpotSignals(parsedSpot);
           }
         } catch {
@@ -203,7 +243,10 @@ export function DashboardSocketProvider({
         }
       }
 
-      if (!sigRes.ok || !statsRes.ok || !wallsRes.ok) return;
+      if (!sigRes.ok || !statsRes.ok || !wallsRes.ok) {
+        if (isMountedRef.current) setIsInitialLoading(false);
+        return;
+      }
 
       const [sigData, statsData, wallsData] = await Promise.all([
         sigRes.json(),
@@ -211,23 +254,41 @@ export function DashboardSocketProvider({
         wallsRes.json(),
       ]);
 
+      if (!isMountedRef.current) return;
+
       startTransition(() => {
-        const parsedSignals = Array.isArray(sigData)
+        const parsedSignals: Signal[] = Array.isArray(sigData)
           ? sigData
           : sigData.signals || [];
-        prevSignalsCountRef.current = parsedSignals.length;
+        knownAlphaKeysRef.current = new Set(parsedSignals.map(signalIdentityKey));
+        hasSeededAlphaRef.current = true;
         setSignals(parsedSignals);
         setStats(statsData);
         setWalls(Array.isArray(wallsData) ? wallsData : wallsData.walls || []);
         setIsInitialLoading(false);
       });
     } catch {
-      setIsInitialLoading(false);
+      if (isMountedRef.current) {
+        setIsInitialLoading(false);
+      }
     }
   }, []);
 
   const connectWebSocket = useCallback(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !isMountedRef.current) return;
+
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    if (wsRef.current) {
+      try {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      } catch {}
+      wsRef.current = null;
+    }
 
     try {
       const wsUrl = resolveWsUrl();
@@ -235,50 +296,82 @@ export function DashboardSocketProvider({
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (!isMountedRef.current) {
+          ws.close();
+          return;
+        }
         setIsConnected(true);
       };
 
       ws.onmessage = (event) => {
+        if (!isMountedRef.current) return;
         try {
           const payload = JSON.parse(event.data);
 
           // Explicit NEW_SIGNAL event (alpha signals only)
-          if (payload.type === "NEW_SIGNAL") {
-            playAlarm();
-            setSignals((prev) => [payload.data, ...prev]);
-            prevSignalsCountRef.current += 1;
+          if (payload.type === "NEW_SIGNAL" && payload.data) {
+            const incoming: Signal = payload.data;
+            knownAlphaKeysRef.current.add(signalIdentityKey(incoming));
+            hasSeededAlphaRef.current = true;
+            playAlarm(incoming.confidence);
+            setSignals((prev) => [incoming, ...prev]);
             return;
           }
 
-          // Explicit NEW_SPOT_SIGNAL event (optional, if backend sends it)
-          if (payload.type === "NEW_SPOT_SIGNAL") {
-            playAlarm();
-            setSpotSignals((prev) => [payload.data, ...prev]);
-            prevSpotSignalsCountRef.current += 1;
+          // Explicit NEW_SPOT_SIGNAL event
+          if (payload.type === "NEW_SPOT_SIGNAL" && payload.data) {
+            const incoming: Signal = payload.data;
+            knownSpotKeysRef.current.add(signalIdentityKey(incoming));
+            hasSeededSpotRef.current = true;
+            playAlarm(incoming.confidence);
+            setSpotSignals((prev) => [incoming, ...prev]);
             return;
           }
 
           if (payload.type === "snapshot") {
-            // Alpha signals length check
+            // Check for genuinely new high-score (>=75) Alpha signals
             if (Array.isArray(payload.signals)) {
-              if (
-                prevSignalsCountRef.current > 0 &&
-                payload.signals.length > prevSignalsCountRef.current
-              ) {
-                playAlarm();
+              const incomingAlpha: Signal[] = payload.signals;
+              if (hasSeededAlphaRef.current) {
+                let maxNewScore = -1;
+                for (const s of incomingAlpha) {
+                  const key = signalIdentityKey(s);
+                  if (!knownAlphaKeysRef.current.has(key)) {
+                    maxNewScore = Math.max(maxNewScore, s.confidence ?? 0);
+                  }
+                }
+                if (maxNewScore >= 75) {
+                  playAlarm(maxNewScore);
+                }
               }
-              prevSignalsCountRef.current = payload.signals.length;
+              knownAlphaKeysRef.current = new Set(
+                incomingAlpha.map(signalIdentityKey)
+              );
+              hasSeededAlphaRef.current = true;
             }
 
-            // Spot signals length check (separate ref so counter is clean)
+            // Check for genuinely new high-score (>=75) Spot signals
             if (Array.isArray(payload.spot_signals)) {
-              if (
-                prevSpotSignalsCountRef.current > 0 &&
-                payload.spot_signals.length > prevSpotSignalsCountRef.current
-              ) {
-                playAlarm();
+              const incomingSpot: Signal[] = payload.spot_signals;
+              if (hasSeededSpotRef.current) {
+                let maxNewSpotScore = -1;
+                for (const s of incomingSpot) {
+                  const key = signalIdentityKey(s);
+                  if (!knownSpotKeysRef.current.has(key)) {
+                    maxNewSpotScore = Math.max(
+                      maxNewSpotScore,
+                      s.confidence ?? 0
+                    );
+                  }
+                }
+                if (maxNewSpotScore >= 75) {
+                  playAlarm(maxNewSpotScore);
+                }
               }
-              prevSpotSignalsCountRef.current = payload.spot_signals.length;
+              knownSpotKeysRef.current = new Set(
+                incomingSpot.map(signalIdentityKey)
+              );
+              hasSeededSpotRef.current = true;
             }
 
             startTransition(() => {
@@ -292,6 +385,7 @@ export function DashboardSocketProvider({
               if (payload.settings) {
                 setSettings((prev) => {
                   const merged = { ...prev, ...payload.settings };
+                  settingsRef.current = merged;
                   try {
                     localStorage.setItem(
                       LOCAL_STORAGE_SETTINGS_KEY,
@@ -312,10 +406,15 @@ export function DashboardSocketProvider({
       };
 
       ws.onclose = () => {
+        if (!isMountedRef.current) return;
         setIsConnected(false);
-        wsRef.current = null;
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
         reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket();
+          if (isMountedRef.current) {
+            reconnectFnRef.current();
+          }
         }, 2000);
       };
 
@@ -323,22 +422,35 @@ export function DashboardSocketProvider({
         ws.close();
       };
     } catch {
-      reconnectTimeoutRef.current = setTimeout(() => {
-        connectWebSocket();
-      }, 3000);
+      if (isMountedRef.current) {
+        reconnectTimeoutRef.current = setTimeout(() => {
+          if (isMountedRef.current) {
+            reconnectFnRef.current();
+          }
+        }, 3000);
+      }
     }
   }, [playAlarm]);
 
   useEffect(() => {
+    reconnectFnRef.current = connectWebSocket;
+  }, [connectWebSocket]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
     fetchInitialHttpSnapshot();
     connectWebSocket();
 
     return () => {
+      isMountedRef.current = false;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
       if (wsRef.current) {
+        wsRef.current.onclose = null;
         wsRef.current.close();
+        wsRef.current = null;
       }
     };
   }, [connectWebSocket, fetchInitialHttpSnapshot]);
@@ -355,6 +467,7 @@ export function DashboardSocketProvider({
   const saveBotSettings = useCallback(
     async (newSettings: BotSettings): Promise<boolean> => {
       // Update Context & localStorage in 0ms so UI NEVER reverts to 55!
+      settingsRef.current = newSettings;
       setSettings(newSettings);
       try {
         localStorage.setItem(
@@ -373,6 +486,7 @@ export function DashboardSocketProvider({
         if (!res.ok) return false;
         const data = await res.json();
         if (data?.settings) {
+          settingsRef.current = data.settings;
           setSettings(data.settings);
           try {
             localStorage.setItem(
@@ -389,21 +503,35 @@ export function DashboardSocketProvider({
     []
   );
 
+  const contextValue = useMemo<DashboardSocketState>(
+    () => ({
+      signals,
+      spotSignals,
+      stats,
+      walls,
+      settings,
+      isConnected,
+      isInitialLoading,
+      lastUpdated,
+      triggerRefresh,
+      saveBotSettings,
+    }),
+    [
+      signals,
+      spotSignals,
+      stats,
+      walls,
+      settings,
+      isConnected,
+      isInitialLoading,
+      lastUpdated,
+      triggerRefresh,
+      saveBotSettings,
+    ]
+  );
+
   return (
-    <DashboardSocketContext.Provider
-      value={{
-        signals,
-        spotSignals,
-        stats,
-        walls,
-        settings,
-        isConnected,
-        isInitialLoading,
-        lastUpdated,
-        triggerRefresh,
-        saveBotSettings,
-      }}
-    >
+    <DashboardSocketContext.Provider value={contextValue}>
       {children}
     </DashboardSocketContext.Provider>
   );

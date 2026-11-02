@@ -1,10 +1,14 @@
 // app/walls/page.tsx
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import WallTable from "@/components/WallTable";
 import DepthChart from "@/components/DepthChart";
-import { useDashboardSocket } from "@/context/DashboardSocketContext";
+import {
+  useDashboardSocket,
+  resolveApiBase,
+} from "@/context/DashboardSocketContext";
+import { DepthPoint } from "@/types/types";
 import {
   Shield,
   Flame,
@@ -19,12 +23,19 @@ export default function LiveWallsPage() {
     useDashboardSocket();
   const [searchSymbol, setSearchSymbol] = useState<string>("");
   const [selectedWallSymbol, setSelectedWallSymbol] = useState<string>("");
+  const [fetchedDepthState, setFetchedDepthState] = useState<{
+    symbol: string;
+    depth?: DepthPoint[];
+    bidAskRatio?: number | null;
+  } | null>(null);
 
   // Active minimum wall threshold + proximity gate from Control Center
   const minWallUsd = settings?.min_wall_usd ?? 5000;
   const maxProximityPct = settings?.proximity_pct ?? 1.5;
 
   const filteredWalls = useMemo(() => {
+    const minSubWallUsd = Math.min(minWallUsd, 1500);
+
     return walls
       .map((w) => {
         const canonicalMid =
@@ -35,7 +46,7 @@ export default function LiveWallsPage() {
         if (w.exchange_walls && w.exchange_walls.length > 0) {
           const validExWalls = w.exchange_walls
             .map((ew) => {
-              // Recalculate true distance % against the coin's single mid_price!
+              // Recalculate true distance % against the coin's single mid_price
               const trueDist =
                 canonicalMid > ew.price
                   ? Number(
@@ -49,7 +60,7 @@ export default function LiveWallsPage() {
             })
             .filter(
               (ew) =>
-                ew.usd_value >= minWallUsd &&
+                ew.usd_value >= minSubWallUsd &&
                 ew.price < canonicalMid &&
                 ew.distance_pct >= 0.01 &&
                 ew.distance_pct <= maxProximityPct
@@ -62,6 +73,8 @@ export default function LiveWallsPage() {
             (sum, ew) => sum + ew.usd_value,
             0
           );
+          if (newTotal < minWallUsd) return null;
+
           return {
             ...w,
             mid_price: canonicalMid,
@@ -122,15 +135,55 @@ export default function LiveWallsPage() {
       );
       if (found) return found;
     }
-    return (
-      filteredWalls[0] || {
-        symbol: "BTC",
-        price: 68000,
-        mid_price: 68200,
-        usd_value: 120000,
-      }
-    );
+    return filteredWalls[0] ?? null;
   }, [filteredWalls, selectedWallSymbol]);
+
+  const focusedSym = focusedWall?.symbol?.trim().toUpperCase() || "";
+  const liveDepth =
+    fetchedDepthState && fetchedDepthState.symbol === focusedSym
+      ? fetchedDepthState.depth
+      : undefined;
+  const liveBidAskRatio =
+    fetchedDepthState && fetchedDepthState.symbol === focusedSym
+      ? fetchedDepthState.bidAskRatio
+      : undefined;
+
+  // Fetch real L2 cumulative depth for whichever wall token is focused
+  useEffect(() => {
+    if (!focusedSym) return;
+
+    let active = true;
+
+    const pullDepth = () => {
+      const apiBase = resolveApiBase();
+      fetch(`${apiBase}/api/depth/${encodeURIComponent(focusedSym)}`, {
+        cache: "no-store",
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!active || !data) return;
+          setFetchedDepthState({
+            symbol: focusedSym,
+            depth:
+              Array.isArray(data.depth) && data.depth.length > 0
+                ? data.depth
+                : undefined,
+            bidAskRatio:
+              typeof data.bid_ask_ratio === "number"
+                ? data.bid_ask_ratio
+                : undefined,
+          });
+        })
+        .catch(() => {});
+    };
+
+    pullDepth();
+    const timer = setInterval(pullDepth, 12000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [focusedSym]);
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-3 sm:px-6 pb-16">
@@ -229,10 +282,16 @@ export default function LiveWallsPage() {
 
         <div className="space-y-3 lg:sticky lg:top-20 lg:col-span-5">
           <DepthChart
-            symbol={focusedWall.symbol}
-            midPrice={focusedWall.mid_price || focusedWall.price * 1.005}
-            wallPrice={focusedWall.price}
-            wallUsd={focusedWall.usd_value}
+            symbol={focusedWall ? focusedWall.symbol : ""}
+            midPrice={
+              focusedWall
+                ? focusedWall.mid_price || focusedWall.price * 1.005
+                : 0
+            }
+            wallPrice={focusedWall?.price}
+            wallUsd={focusedWall?.usd_value}
+            depthData={liveDepth}
+            bidAskRatio={liveBidAskRatio}
             height={320}
           />
 
@@ -242,10 +301,10 @@ export default function LiveWallsPage() {
               <span>How to Trade Bid Wall Setups</span>
             </div>
             <p className="mt-1 leading-relaxed text-slate-400">
-              Click any wall card on the left to inspect its cumulative Bid vs.
-              Ask imbalance curve above. Look for tokens with{" "}
+              Click any wall card on the left to inspect its live L2 cumulative
+              Bid vs. Ask imbalance curve above. Look for tokens with{" "}
               <strong className="text-emerald-300">&gt;70% Respect Rate</strong>{" "}
-              and <strong className="text-cyan-300">&gt;1.8x Bid/Ask Ratio</strong>{" "}
+              and <strong className="text-cyan-300">&gt;1.3x Bid/Ask Ratio</strong>{" "}
               (Ask Vacuum) for low-risk spot scalps.
             </p>
           </div>

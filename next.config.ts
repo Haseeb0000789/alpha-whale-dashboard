@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ['10.2.0.2'],
   cacheComponents: true,
   partialPrefetching: true,
+  experimental: {
+    turbopackPluginRuntimeStrategy:
+      process.platform === "win32" ? "forceWorkerThreads" : "workerThreads",
+  },
   turbopack: {
     rules: {
       "*.css": {

@@ -28,6 +28,7 @@ export interface Signal {
   smc_ob: boolean;
   smc_retest?: boolean;
   is_extended: boolean;
+  extension_pct?: number;
   detected_at?: string;
   level_price?: number;
   breakout_price?: number;
@@ -69,6 +70,7 @@ export interface BidWall {
   entry_score?: number;
   relevance_score?: number;
   respect_rate?: number;
+  bid_ask_ratio?: number | null;
   scans_seen?: number;
   step_up_count?: number;
   is_live_watch?: boolean;
@@ -123,6 +125,8 @@ export interface DepthPoint {
   priceLabel: string;
   bidsUsd: number | null;
   asksUsd: number | null;
+  bid_usd?: number;
+  ask_usd?: number;
 }
 
 // Upgrade 1: Coin Detail Page interfaces
@@ -144,6 +148,7 @@ export interface CoinDetailData {
   total_signals: number;
   active_walls_count: number;
   respect_rate_pct: number;
+  bid_ask_ratio?: number | null;
   signals: Signal[];
   wall_history: CoinWallHistoryItem[];
   ohlc?: OHLCCandle[];

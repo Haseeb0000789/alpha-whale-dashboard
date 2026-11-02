@@ -5,13 +5,15 @@ import React, {
   Suspense,
   useState,
   useEffect,
-  useCallback,
   useMemo,
 } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { useDashboardSocket } from "@/context/DashboardSocketContext";
+import {
+  useDashboardSocket,
+  resolveApiBase,
+} from "@/context/DashboardSocketContext";
 import {
   CoinDetailData,
   formatCryptoPrice,
@@ -31,16 +33,6 @@ import {
   Activity,
   Sparkles,
 } from "lucide-react";
-
-function resolveApiBase(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL;
-  }
-  if (typeof window !== "undefined") {
-    return `http://${window.location.hostname}:8000`;
-  }
-  return "http://localhost:8000";
-}
 
 function formatSafeRelativeTime(
   isoDate: string | undefined,
@@ -120,6 +112,28 @@ function CoinDetailContent() {
     const respectPct =
       rawRespect <= 1 ? Math.round(rawRespect * 100) : Math.round(rawRespect);
 
+    const finalizedSignals = coinSignals.filter(
+      (s) =>
+        s.outcome_finalized ||
+        (s.outcome_status && s.outcome_status !== "IN_PLAY")
+    );
+    const computedWinRate =
+      finalizedSignals.length > 0
+        ? Number(
+            (
+              (finalizedSignals.filter(
+                (s) =>
+                  s.hit_tp1 ||
+                  s.hit_tp2 ||
+                  s.outcome_status === "TP1_HIT" ||
+                  s.outcome_status === "TP2_HIT"
+              ).length /
+                finalizedSignals.length) *
+              100
+            ).toFixed(1)
+          )
+        : respectPct;
+
     const flatWalls = coinWalls.flatMap((w, idx) => {
       if (w.exchange_walls && w.exchange_walls.length > 0) {
         return w.exchange_walls.map((ew, subIdx) => ({
@@ -148,45 +162,49 @@ function CoinDetailContent() {
     return {
       symbol,
       current_price: Number(realPrice),
-      change_24h_pct: 4.2,
-      win_rate_pct: respectPct,
+      change_24h_pct: Number(latestSig?.extension_pct ?? 0),
+      win_rate_pct: computedWinRate,
       total_signals: coinSignals.length,
       active_walls_count: flatWalls.length,
       respect_rate_pct: respectPct,
+      bid_ask_ratio: latestSig?.bid_ask_ratio ?? null,
       signals: coinSignals,
       wall_history: flatWalls,
     };
   }, [wsSignals, wsWalls, symbol]);
 
-  // 3. Fetch OHLC candles & full 24h DB history in the background without blocking UI
-  const fetchBackgroundCoinDetails = useCallback(async () => {
+  // 3. Fetch OHLC candles, L2 depth & full 24h DB history in the background without blocking UI
+  useEffect(() => {
+    let active = true;
+    const initId = setTimeout(() => setNowMs(Date.now()), 0);
+    const clockId = setInterval(() => setNowMs(Date.now()), 30000);
     const apiBase = resolveApiBase();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
 
-    try {
-      const res = await fetch(
-        `${apiBase}/api/coin/${encodeURIComponent(symbol)}`,
-        {
-          cache: "no-store",
-          signal: controller.signal,
-        }
-      );
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data: CoinDetailData = await res.json();
+    fetch(`${apiBase}/api/coin/${encodeURIComponent(symbol)}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: CoinDetailData | null) => {
+        clearTimeout(timeoutId);
+        if (!active || !data) return;
         setApiCoinData(data);
         setNowMs(Date.now());
-      }
-    } catch {
-      // Instant WebSocket data is already displayed, so no error screen needed
-    }
-  }, [symbol]);
+      })
+      .catch(() => {
+        clearTimeout(timeoutId);
+      });
 
-  useEffect(() => {
-    setNowMs(Date.now());
-    fetchBackgroundCoinDetails();
-  }, [fetchBackgroundCoinDetails]);
+    return () => {
+      active = false;
+      clearTimeout(initId);
+      clearInterval(clockId);
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [symbol]);
 
   // Merge API data (when ready) over Instant WebSocket Data
   const coinData: CoinDetailData | null = useMemo(() => {
@@ -307,7 +325,7 @@ function CoinDetailContent() {
                     {coinData.total_signals}
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    15m • 1h • 4h
+                    15m • 1h • 4h • 1d
                   </span>
                 </div>
               </div>
@@ -366,6 +384,7 @@ function CoinDetailContent() {
               wallPrice={coinData.wall_history[0]?.price}
               wallUsd={coinData.wall_history[0]?.usd_value}
               depthData={coinData.depth}
+              bidAskRatio={coinData.bid_ask_ratio}
               height={330}
             />
           </div>

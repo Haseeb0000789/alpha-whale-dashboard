@@ -1,7 +1,7 @@
 // app/settings/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -16,6 +16,7 @@ import {
   Save,
   RotateCcw,
   CheckCircle2,
+  AlertTriangle,
   ArrowLeft,
   Cpu,
   Volume2,
@@ -25,25 +26,43 @@ import {
 export default function ControlCenterPage() {
   const { settings, saveBotSettings } = useDashboardSocket();
 
-  // Local form state synced with global WebSocket/localStorage settings
-  const [formData, setFormData] = useState<BotSettings>(settings);
-  const [isDirty, setIsDirty] = useState<boolean>(false);
+  // Local form draft overlaid on global WebSocket/localStorage settings
+  const [draft, setDraft] = useState<Partial<BotSettings> | null>(null);
+  const formData: BotSettings = useMemo(
+    () => (draft ? { ...settings, ...draft } : settings),
+    [settings, draft]
+  );
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    variant: "synced" | "local";
+  } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync local form when global settings load, ONLY if user isn't actively editing
-  useEffect(() => {
-    if (!isDirty) {
-      setFormData(settings);
+  const showToast = (message: string, variant: "synced" | "local") => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
     }
-  }, [settings, isDirty]);
+    setToast({ message, variant });
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 3500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   const updateField = <K extends keyof BotSettings>(
     key: K,
     value: BotSettings[K]
   ) => {
-    setIsDirty(true);
-    setFormData((prev) => ({ ...prev, [key]: value }));
+    setDraft((prev) => ({ ...(prev ?? {}), [key]: value }));
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -51,14 +70,19 @@ export default function ControlCenterPage() {
     setIsSaving(true);
     const ok = await saveBotSettings(formData);
     setIsSaving(false);
-    setIsDirty(false);
+    setDraft(null);
 
-    setToast(
-      ok
-        ? `✅ Settings Saved! Min Score (${formData.min_score}) synced with Scanner & Signals Grid.`
-        : `⚡ Saved locally! Min Score (${formData.min_score}) active on Dashboard.`
-    );
-    setTimeout(() => setToast(null), 3500);
+    if (ok) {
+      showToast(
+        `Settings Saved! Min Score (${formData.min_score}) synced with Scanner & Signals Grid.`,
+        "synced"
+      );
+    } else {
+      showToast(
+        `Backend unreachable — saved locally on Dashboard (Min Score: ${formData.min_score}).`,
+        "local"
+      );
+    }
   };
 
   const handleResetDefaults = async () => {
@@ -73,11 +97,14 @@ export default function ControlCenterPage() {
       cooldown_minutes: 30,
       max_alerts_per_cycle: 5,
     };
-    setFormData(recommended);
-    setIsDirty(false);
-    await saveBotSettings(recommended);
-    setToast("🔄 Restored Recommended Institutional Defaults (Min Score: 65)");
-    setTimeout(() => setToast(null), 3500);
+    setDraft(null);
+    const ok = await saveBotSettings(recommended);
+    showToast(
+      ok
+        ? "Restored Recommended Institutional Defaults (Min Score: 65)"
+        : "Restored Recommended Defaults locally (Backend offline)",
+      ok ? "synced" : "local"
+    );
   };
 
   return (
@@ -288,7 +315,7 @@ export default function ControlCenterPage() {
                   <span>Anti-Spoof & Dead-Cat Bounce Filter</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-slate-400">
-                  Penalizes coins with &lt;45% wall respect rate or weak taker buy flow
+                  Penalizes coins with &lt;45% wall respect rate or dumped macro structure
                 </p>
               </div>
               <input
@@ -394,10 +421,18 @@ export default function ControlCenterPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
-            className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-emerald-500/40 bg-[#0B0F19]/95 px-4 py-3 text-xs font-bold text-emerald-300 shadow-2xl backdrop-blur-xl"
+            className={`fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border bg-[#0B0F19]/95 px-4 py-3 text-xs font-bold shadow-2xl backdrop-blur-xl ${
+              toast.variant === "synced"
+                ? "border-emerald-500/40 text-emerald-300"
+                : "border-amber-500/40 text-amber-300"
+            }`}
           >
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            <span>{toast}</span>
+            {toast.variant === "synced" ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 text-amber-400" />
+            )}
+            <span>{toast.message}</span>
           </motion.div>
         )}
       </AnimatePresence>

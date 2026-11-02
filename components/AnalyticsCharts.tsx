@@ -28,6 +28,13 @@ interface AnalyticsChartsProps {
   isLoading: boolean;
 }
 
+function localDayKey(d: Date): string {
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${yr}-${mo}-${da}`;
+}
+
 export default function AnalyticsCharts({
   signals,
   stats,
@@ -36,61 +43,129 @@ export default function AnalyticsCharts({
   const [mountedDate, setMountedDate] = useState<Date | null>(null);
 
   useEffect(() => {
-    setMountedDate(new Date());
+    const initId = setTimeout(() => setMountedDate(new Date()), 0);
+    return () => clearTimeout(initId);
   }, []);
 
   const chartData: EquityCurvePoint[] = useMemo(() => {
     const baseWinRate =
       stats?.win_rate_pct !== undefined && stats.win_rate_pct > 0
         ? stats.win_rate_pct
-        : 36.6;
+        : 50.0;
 
-    const avgGain = stats?.avg_max_gain_pct ?? 2.89;
-    const avgDd = Math.abs(stats?.avg_max_drawdown_pct ?? 1.58);
+    const avgGain = stats?.avg_max_gain_pct ?? 2.8;
+    const avgDd = Math.abs(stats?.avg_max_drawdown_pct ?? 1.6);
     const wrDec = baseWinRate / 100;
-    const slDec = (stats?.sl_rate_pct ?? 40.5) / 100;
+    const slDec = (stats?.sl_rate_pct ?? 35.0) / 100;
+    const baselineDailyEdge = Number((wrDec * avgGain - slDec * avgDd).toFixed(2));
 
-    const netExpectancyPerDay = Math.max(
-      0.45,
-      (wrDec * avgGain - slDec * avgDd * 0.45) * 1.8
-    );
+    // Group real signals into 7 calendar-day buckets
+    const refNow = mountedDate ?? new Date(0);
+    const buckets = new Map<
+      string,
+      { total: number; finalized: number; wins: number; netPnlSum: number }
+    >();
 
-    const wrOffsets = [-4.2, -1.8, -3.1, +2.6, -1.1, +1.9, 0];
-    const dailyEdgeMultipliers = [0.7, 0.9, 0.6, 1.25, 0.95, 1.3, 1.0];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(refNow);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      buckets.set(localDayKey(d), {
+        total: 0,
+        finalized: 0,
+        wins: 0,
+        netPnlSum: 0,
+      });
+    }
+
+    for (const s of signals) {
+      if (!s.detected_at) continue;
+      const dt = new Date(s.detected_at);
+      if (isNaN(dt.getTime())) continue;
+      const b = buckets.get(localDayKey(dt));
+      if (!b) continue;
+
+      b.total += 1;
+      const st = s.outcome_status || "IN_PLAY";
+      const isFin = Boolean(s.outcome_finalized) || st !== "IN_PLAY";
+      if (!isFin) continue;
+
+      b.finalized += 1;
+      const entry = s.entry_high || s.breakout_price || s.entry_low || 0;
+
+      if (s.hit_tp2 || st === "TP2_HIT") {
+        b.wins += 1;
+        const tp2Pct =
+          entry > 0 && s.tp2_price > entry
+            ? ((s.tp2_price - entry) / entry) * 100
+            : s.max_gain_pct || avgGain;
+        b.netPnlSum += Math.max(0.5, tp2Pct * 0.75);
+      } else if (s.hit_tp1 || st === "TP1_HIT") {
+        b.wins += 1;
+        const tp1Pct =
+          entry > 0 && s.tp1_price > entry
+            ? ((s.tp1_price - entry) / entry) * 100
+            : s.max_gain_pct || avgGain;
+        // 50% booked at TP1 + 50% runner protected at +0.25% fee-adjusted BE
+        b.netPnlSum += Math.max(0.4, tp1Pct * 0.5 + 0.125);
+      } else if (s.breakeven_exit || st === "BREAKEVEN") {
+        // Fee-adjusted trailing breakeven (+0.25% gross -> ~0.05% net saved)
+        b.netPnlSum += 0.05;
+      } else if (s.hit_sl || st === "SL_HIT") {
+        const slPct =
+          entry > 0 && s.stop_loss > 0 && s.stop_loss < entry
+            ? ((entry - s.stop_loss) / entry) * 100
+            : Math.abs(s.max_drawdown_pct || avgDd);
+        b.netPnlSum -= Math.max(0.25, slPct);
+      }
+    }
 
     const points: EquityCurvePoint[] = [];
     let runningCumulativePnl = 0;
+    let carryWinRate = baseWinRate;
 
     for (let i = 6; i >= 0; i--) {
-      let shortLabel = i === 0 ? "Today" : `D-${i}`;
+      const d = new Date(refNow);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
 
+      let shortLabel = i === 0 ? "Today" : `D-${i}`;
       if (i > 0 && mountedDate) {
-        const d = new Date(mountedDate);
-        d.setDate(mountedDate.getDate() - i);
         shortLabel = d.toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
         });
       }
 
-      const idx = 6 - i;
-      const winRate = Math.min(
-        98,
-        Math.max(10, Number((baseWinRate + wrOffsets[idx]).toFixed(1)))
-      );
-      const dailyGain = Number(
-        (netExpectancyPerDay * dailyEdgeMultipliers[idx]).toFixed(2)
-      );
+      const b = buckets.get(localDayKey(d));
+      let dayWinRate = carryWinRate;
+      let dailyGain = 0;
+      let sigCount = b?.total ?? 0;
+
+      if (b && b.finalized > 0) {
+        dayWinRate = Number(((b.wins / b.finalized) * 100).toFixed(1));
+        carryWinRate = dayWinRate;
+        // Normalize daily portfolio impact assuming 20% allocation per setup (capped to realistic daily turnover)
+        const avgSetupPnl = b.netPnlSum / b.finalized;
+        const effectiveTrades = Math.min(b.finalized, 5);
+        dailyGain = Number((avgSetupPnl * effectiveTrades * 0.25).toFixed(2));
+      } else if (signals.length === 0 && stats && (stats.finalized ?? 0) > 0) {
+        // Fallback to real aggregate DB stats only if client signal list hasn't hydrated yet
+        dayWinRate = Number(baseWinRate.toFixed(1));
+        dailyGain = Number((baselineDailyEdge * 0.5).toFixed(2));
+        sigCount = Math.round((stats.total_signals || 0) / 7);
+      }
+
       runningCumulativePnl = Number(
         (runningCumulativePnl + dailyGain).toFixed(2)
       );
 
       points.push({
         dateLabel: shortLabel,
-        winRate,
+        winRate: Math.min(100, Math.max(0, dayWinRate)),
         dailyGainPct: dailyGain,
         cumulativePnlPct: runningCumulativePnl,
-        signalsCount: Math.max(3, Math.round((stats?.total_signals || 144) / 7)),
+        signalsCount: sigCount,
       });
     }
 
@@ -106,7 +181,10 @@ export default function AnalyticsCharts({
     );
   }
 
-  const latestWinRate = chartData[chartData.length - 1]?.winRate ?? 0;
+  const latestWinRate =
+    stats?.win_rate_pct !== undefined && stats.win_rate_pct > 0
+      ? stats.win_rate_pct
+      : chartData[chartData.length - 1]?.winRate ?? 0;
   const latestEquity = chartData[chartData.length - 1]?.cumulativePnlPct ?? 0;
 
   const minWrAxis = Math.max(
@@ -137,7 +215,7 @@ export default function AnalyticsCharts({
                   </span>
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Rolling daily percentage of spot signals hitting TP1 or +2% target
+                  Real daily percentage of finalized signals hitting TP1 / TP2 targets
                 </p>
               </div>
             </div>
@@ -147,7 +225,7 @@ export default function AnalyticsCharts({
                 {latestWinRate.toFixed(1)}%
               </span>
               <p className="text-[9px] uppercase tracking-wider text-slate-500">
-                Current
+                7D Overall
               </p>
             </div>
           </div>
@@ -189,7 +267,7 @@ export default function AnalyticsCharts({
                   itemStyle={{ color: "#22d3ee", fontWeight: 700 }}
                   formatter={(value) => [
                     `${Number(value ?? 0).toFixed(1)}%`,
-                    "Win Rate",
+                    "Daily Win Rate",
                   ]}
                 />
                 <ReferenceLine
@@ -226,18 +304,23 @@ export default function AnalyticsCharts({
                 <h3 className="flex items-center gap-2 text-xs font-bold text-white sm:text-sm">
                   Cumulative PnL / Equity Curve (7D)
                   <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
-                    Compounded Edge
+                    Realized Outcomes
                   </span>
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Net profit curve factoring in TP1/TP2 wins & trailing breakeven saves
+                  Net realized curve from TP1/TP2 wins, fee-adjusted BE saves & SL exits
                 </p>
               </div>
             </div>
 
             <div className="text-right">
-              <span className="font-mono text-base font-black text-emerald-400 sm:text-lg">
-                +{latestEquity.toFixed(2)}%
+              <span
+                className={`font-mono text-base font-black sm:text-lg ${
+                  latestEquity >= 0 ? "text-emerald-400" : "text-rose-400"
+                }`}
+              >
+                {latestEquity >= 0 ? "+" : ""}
+                {latestEquity.toFixed(2)}%
               </span>
               <p className="text-[9px] uppercase tracking-wider text-slate-500">
                 7D Net Return
@@ -275,7 +358,9 @@ export default function AnalyticsCharts({
                   fontSize={10}
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(val) => `+${val}%`}
+                  tickFormatter={(val) =>
+                    `${Number(val) >= 0 ? "+" : ""}${val}%`
+                  }
                 />
                 <Tooltip
                   cursor={{ stroke: "rgba(16, 185, 129, 0.35)", strokeWidth: 1.5 }}
@@ -286,10 +371,13 @@ export default function AnalyticsCharts({
                     fontSize: "11px",
                   }}
                   itemStyle={{ color: "#34d399", fontWeight: 700 }}
-                  formatter={(value) => [
-                    `+${Number(value ?? 0).toFixed(2)}%`,
-                    "Cumulative Profit",
-                  ]}
+                  formatter={(value) => {
+                    const num = Number(value ?? 0);
+                    return [
+                      `${num >= 0 ? "+" : ""}${num.toFixed(2)}%`,
+                      "Cumulative PnL",
+                    ];
+                  }}
                 />
                 <Area
                   type="monotone"

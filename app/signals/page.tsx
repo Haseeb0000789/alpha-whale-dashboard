@@ -50,184 +50,6 @@ const PATTERN_OPTIONS = [
   { value: "institutional_reaccumulation", label: "Institutional Re-Accumulation" },
 ];
 
-// Instant fallback Main Spot setups while backend completes first Binance Spot API sweep
-const INITIAL_SPOT_SIGNALS: Signal[] = [
-  {
-    id: 90001,
-    symbol: "SUI",
-    structure: "vwap_ema_pullback",
-    timeframe: "15m",
-    confidence: 88,
-    p1_volume_score: 22,
-    p2_wall_score: 21,
-    p3_structure_score: 35,
-    p4_btc_score: 10,
-    entry_low: 2.142,
-    entry_high: 2.148,
-    stop_loss: 2.121,
-    tp1_price: 2.189,
-    tp2_price: 2.225,
-    volume_ratio: 2.8,
-    taker_buy_ratio: 0.66,
-    smc_bos: true,
-    smc_ob: true,
-    is_extended: false,
-    detected_at: "2026-11-02T00:01:00.000Z",
-    outcome_status: "IN_PLAY",
-    max_gain_pct: 0.9,
-    market_type: "SPOT",
-    trade_style: "SCALP",
-    rs_vs_btc: 4.2,
-    bid_ask_ratio: 1.85,
-    rsi_val: 58.4,
-  },
-  {
-    id: 90002,
-    symbol: "TAO",
-    structure: "institutional_reaccumulation",
-    timeframe: "4h",
-    confidence: 91,
-    p1_volume_score: 23,
-    p2_wall_score: 22,
-    p3_structure_score: 36,
-    p4_btc_score: 10,
-    entry_low: 512.0,
-    entry_high: 515.5,
-    stop_loss: 502.5,
-    tp1_price: 537.5,
-    tp2_price: 556.0,
-    volume_ratio: 3.1,
-    taker_buy_ratio: 0.64,
-    smc_bos: true,
-    smc_ob: true,
-    is_extended: false,
-    detected_at: "2026-11-02T00:01:00.000Z",
-    outcome_status: "IN_PLAY",
-    max_gain_pct: 1.8,
-    market_type: "SPOT",
-    trade_style: "SWING",
-    rs_vs_btc: 6.8,
-    bid_ask_ratio: 2.1,
-    rsi_val: 61.2,
-  },
-  {
-    id: 90003,
-    symbol: "SOL",
-    structure: "liquidity_sweep_breakout",
-    timeframe: "1h",
-    confidence: 85,
-    p1_volume_score: 21,
-    p2_wall_score: 20,
-    p3_structure_score: 34,
-    p4_btc_score: 10,
-    entry_low: 178.4,
-    entry_high: 179.1,
-    stop_loss: 176.8,
-    tp1_price: 182.5,
-    tp2_price: 185.4,
-    volume_ratio: 2.4,
-    taker_buy_ratio: 0.63,
-    smc_bos: true,
-    smc_ob: true,
-    is_extended: false,
-    detected_at: "2026-11-02T00:01:00.000Z",
-    outcome_status: "TP1_HIT",
-    max_gain_pct: 2.1,
-    market_type: "SPOT",
-    trade_style: "SCALP",
-    rs_vs_btc: 2.9,
-    bid_ask_ratio: 1.65,
-    rsi_val: 60.0,
-  },
-  {
-    id: 90004,
-    symbol: "FET",
-    structure: "order_block_bounce",
-    timeframe: "15m",
-    confidence: 82,
-    p1_volume_score: 19,
-    p2_wall_score: 20,
-    p3_structure_score: 33,
-    p4_btc_score: 10,
-    entry_low: 1.382,
-    entry_high: 1.388,
-    stop_loss: 1.371,
-    tp1_price: 1.414,
-    tp2_price: 1.438,
-    volume_ratio: 2.5,
-    taker_buy_ratio: 0.65,
-    smc_bos: true,
-    smc_ob: true,
-    is_extended: false,
-    detected_at: "2026-11-02T00:01:00.000Z",
-    outcome_status: "IN_PLAY",
-    max_gain_pct: 0.6,
-    market_type: "SPOT",
-    trade_style: "SCALP",
-    rs_vs_btc: 3.7,
-    bid_ask_ratio: 1.54,
-    rsi_val: 55.8,
-  },
-  {
-    id: 90005,
-    symbol: "RENDER",
-    structure: "ascending_triangle",
-    timeframe: "4h",
-    confidence: 84,
-    p1_volume_score: 20,
-    p2_wall_score: 20,
-    p3_structure_score: 34,
-    p4_btc_score: 10,
-    entry_low: 5.42,
-    entry_high: 5.46,
-    stop_loss: 5.32,
-    tp1_price: 5.69,
-    tp2_price: 5.89,
-    volume_ratio: 2.2,
-    taker_buy_ratio: 0.61,
-    smc_bos: true,
-    smc_ob: true,
-    is_extended: false,
-    detected_at: "2026-11-02T00:01:00.000Z",
-    outcome_status: "IN_PLAY",
-    max_gain_pct: 1.4,
-    market_type: "SPOT",
-    trade_style: "SWING",
-    rs_vs_btc: 3.1,
-    bid_ask_ratio: 1.72,
-    rsi_val: 59.3,
-  },
-  {
-    id: 90006,
-    symbol: "PENDLE",
-    structure: "vwap_ema_pullback",
-    timeframe: "1h",
-    confidence: 79,
-    p1_volume_score: 18,
-    p2_wall_score: 19,
-    p3_structure_score: 32,
-    p4_btc_score: 10,
-    entry_low: 4.61,
-    entry_high: 4.64,
-    stop_loss: 4.58,
-    tp1_price: 4.73,
-    tp2_price: 4.82,
-    volume_ratio: 2.1,
-    taker_buy_ratio: 0.62,
-    smc_bos: true,
-    smc_ob: false,
-    is_extended: false,
-    detected_at: "2026-11-02T00:01:00.000Z",
-    outcome_status: "IN_PLAY",
-    max_gain_pct: 0.5,
-    market_type: "SPOT",
-    trade_style: "SCALP",
-    rs_vs_btc: 2.4,
-    bid_ask_ratio: 1.48,
-    rsi_val: 54.1,
-  },
-];
-
 type MarketTab = "ALPHA" | "SPOT";
 type SpotStyleFilter = "ALL" | "SCALP" | "SWING";
 type SortMode = "relevance" | "confidence" | "time";
@@ -351,28 +173,25 @@ export default function SignalsGridPage() {
   const [selectedTf, setSelectedTf] = useState<TimeframeFilter>("ALL");
   const [selectedPattern, setSelectedPattern] = useState<string>("ALL");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("ALL");
-  const [minScore, setMinScore] = useState<number>(settings?.min_score ?? 65);
+  const [customMinScore, setCustomMinScore] = useState<number | null>(null);
+  const minScore = customMinScore ?? (settings?.min_score ?? 65);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [onlyReady, setOnlyReady] = useState<boolean>(false);
   const [sortMode, setSortMode] = useState<SortMode>("relevance");
 
-  const activeSpotPool = useMemo(() => {
-    return wsSpotSignals && wsSpotSignals.length > 0
-      ? wsSpotSignals
-      : INITIAL_SPOT_SIGNALS;
-  }, [wsSpotSignals]);
-
+  // Always show authentic live Spot signals — never inject hardcoded fake trade setups
+  const activeSpotPool = useMemo(() => wsSpotSignals ?? [], [wsSpotSignals]);
   const baseDataset = marketTab === "ALPHA" ? signals : activeSpotPool;
 
+  // Update relative-time clock on mount + 30s interval instead of every 2.5s WS tick
   useEffect(() => {
-    setNowMs(Date.now());
-  }, [signals, wsSpotSignals]);
-
-  useEffect(() => {
-    if (settings?.min_score !== undefined) {
-      setMinScore(settings.min_score);
-    }
-  }, [settings?.min_score]);
+    const initId = setTimeout(() => setNowMs(Date.now()), 0);
+    const id = setInterval(() => setNowMs(Date.now()), 30000);
+    return () => {
+      clearTimeout(initId);
+      clearInterval(id);
+    };
+  }, []);
 
   const outcomeCounts = useMemo(() => {
     let inPlay = 0;
@@ -459,11 +278,13 @@ export default function SignalsGridPage() {
     });
 
     return [...list].sort((a, b) => {
+      const symA = a.symbol.trim().toUpperCase();
+      const symB = b.symbol.trim().toUpperCase();
       const timeA = a.detected_at ? new Date(a.detected_at).getTime() : 0;
       const timeB = b.detected_at ? new Date(b.detected_at).getTime() : 0;
 
       if (sortMode === "relevance") {
-        const refNow = nowMs > 0 ? nowMs : timeA;
+        const refNow = nowMs > 0 ? nowMs : Math.max(timeA, timeB);
         const ageHoursA = Math.max(0, (refNow - timeA) / 3600000);
         const ageHoursB = Math.max(0, (refNow - timeB) / 3600000);
 
@@ -484,31 +305,43 @@ export default function SignalsGridPage() {
         const activeBonusB =
           (b.outcome_status || "IN_PLAY") === "IN_PLAY" ? 20 : 0;
 
-        return (
-          b.confidence +
-          freshScoreB +
-          readyBonusB +
-          wallBonusB +
-          rsBonusB +
-          activeBonusB -
-          (a.confidence +
-            freshScoreA +
-            readyBonusA +
-            wallBonusA +
-            rsBonusA +
-            activeBonusA)
-        );
+        const totalA =
+          Math.round(
+            (a.confidence +
+              freshScoreA +
+              readyBonusA +
+              wallBonusA +
+              rsBonusA +
+              activeBonusA) /
+              2
+          ) * 2;
+        const totalB =
+          Math.round(
+            (b.confidence +
+              freshScoreB +
+              readyBonusB +
+              wallBonusB +
+              rsBonusB +
+              activeBonusB) /
+              2
+          ) * 2;
+
+        if (totalB !== totalA) return totalB - totalA;
+        if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+        return symA.localeCompare(symB);
       }
 
       if (sortMode === "confidence") {
         if (b.confidence !== a.confidence) return b.confidence - a.confidence;
-        return timeB - timeA;
+        if (timeB !== timeA) return timeB - timeA;
+        return symA.localeCompare(symB);
       }
 
       const bucketA = Math.floor(timeA / 120000);
       const bucketB = Math.floor(timeB / 120000);
       if (bucketB !== bucketA) return bucketB - bucketA;
-      return b.confidence - a.confidence;
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+      return symA.localeCompare(symB);
     });
   }, [
     baseDataset,
@@ -523,6 +356,16 @@ export default function SignalsGridPage() {
     onlyReady,
     sortMode,
   ]);
+
+  const resetAllFilters = () => {
+    setSelectedTf("ALL");
+    setSelectedPattern("ALL");
+    setOutcomeFilter("ALL");
+    setSpotStyleFilter("ALL");
+    setOnlyReady(false);
+    setSearchQuery("");
+    setCustomMinScore(null);
+  };
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6 pb-20">
@@ -839,7 +682,7 @@ export default function SignalsGridPage() {
                 min={0}
                 max={100}
                 value={minScore}
-                onChange={(e) => setMinScore(Number(e.target.value))}
+                onChange={(e) => setCustomMinScore(Number(e.target.value))}
                 className="h-1.5 w-24 sm:w-28 cursor-pointer appearance-none rounded-lg bg-slate-800 accent-cyan-400"
               />
               <span className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 font-mono text-[11px] font-bold text-cyan-300">
@@ -876,6 +719,39 @@ export default function SignalsGridPage() {
                 className="h-60 animate-pulse rounded-2xl border border-slate-800/80 bg-slate-900/50 p-5"
               />
             ))}
+          </div>
+        ) : filteredSignals.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-800/80 bg-slate-900/50 px-6 py-16 text-center backdrop-blur-xl">
+            <Cpu className="mb-3 h-10 w-10 text-cyan-400/60" />
+            <h3 className="text-sm font-bold text-white sm:text-base">
+              {baseDataset.length === 0
+                ? marketTab === "SPOT"
+                  ? "Scanning Main CEX Spot Universe for High-Conviction Setups"
+                  : "Waiting for Live 4-Pillar Alpha Breakouts"
+                : "No Signals Match Current Filter Criteria"}
+            </h3>
+            <p className="mt-1.5 max-w-md text-xs text-slate-400">
+              {baseDataset.length === 0
+                ? `Strict institutional gates (Min Score ${minScore}+, closed-bar RVOL, Taker Buy flow & L2 Bid Wall support) are active. Only verified live setups appear here.`
+                : `0 of ${baseDataset.length} active setups match your selected timeframe, pattern, outcome, or ${minScore}+ score filters.`}
+            </p>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+              {baseDataset.length > 0 && (
+                <button
+                  onClick={resetAllFilters}
+                  className="rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:bg-cyan-500/25"
+                >
+                  Reset Filters
+                </button>
+              )}
+              <button
+                onClick={triggerRefresh}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-xs font-bold text-emerald-300 transition hover:bg-emerald-500/25"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>Sync Live Stream</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">

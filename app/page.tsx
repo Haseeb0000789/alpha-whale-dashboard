@@ -1,4 +1,4 @@
-﻿// app/page.tsx
+// app/page.tsx
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -9,30 +9,40 @@ import { useDashboardSocket } from "@/context/DashboardSocketContext";
 import { Zap, Shield, ArrowUpRight, RefreshCw } from "lucide-react";
 
 export default function DashboardOverviewPage() {
-  const { signals, stats, walls, isInitialLoading, triggerRefresh } =
+  const { signals, spotSignals, stats, walls, isInitialLoading, triggerRefresh } =
     useDashboardSocket();
   const [startOfDay, setStartOfDay] = useState<Date | null>(null);
 
   useEffect(() => {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    setStartOfDay(now);
+    const initId = setTimeout(() => {
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      setStartOfDay(now);
+    }, 0);
+    return () => clearTimeout(initId);
   }, []);
 
   const signalsTodayCount = useMemo(() => {
-    if (!startOfDay) return signals.length;
-    const count = signals.filter((s) =>
-      s.detected_at ? new Date(s.detected_at) >= startOfDay : true
+    if (!startOfDay) return 0;
+    return signals.filter((s) =>
+      s.detected_at ? new Date(s.detected_at) >= startOfDay : false
     ).length;
-    return count || signals.length;
   }, [signals, startOfDay]);
+
+  const activeCoinsCount = useMemo(() => {
+    const uniqueSyms = new Set<string>();
+    for (const w of walls) if (w.symbol) uniqueSyms.add(w.symbol.trim().toUpperCase());
+    for (const s of signals) if (s.symbol) uniqueSyms.add(s.symbol.trim().toUpperCase());
+    for (const s of spotSignals) if (s.symbol) uniqueSyms.add(s.symbol.trim().toUpperCase());
+    return uniqueSyms.size;
+  }, [walls, signals, spotSignals]);
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6">
       <StatsCards
         stats={stats}
         signalsTodayCount={signalsTodayCount}
-        activeCoinsCount={walls.length + signals.length || 293}
+        activeCoinsCount={activeCoinsCount}
         isLoading={isInitialLoading}
       />
 
@@ -57,7 +67,7 @@ export default function DashboardOverviewPage() {
                   Open 4-Pillar Signals Grid
                 </h3>
                 <span className="rounded-full border border-cyan-500/30 bg-cyan-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-cyan-300">
-                  {signals.length} Active
+                  {signals.length + spotSignals.length} Active
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">

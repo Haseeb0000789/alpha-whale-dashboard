@@ -11,7 +11,7 @@ import {
   ISeriesApi,
   IPriceLine,
   UTCTimestamp,
-  CandlestickSeries, // <--- YEH NAYA IMPORT ADD KAREIN
+  CandlestickSeries,
 } from "lightweight-charts";
 import { OHLCCandle, formatCryptoPrice } from "@/types/types";
 import { CandlestickChart } from "lucide-react";
@@ -85,22 +85,26 @@ export default function TradingChart({
   const chartInstanceRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
+  const fittedKeyRef = useRef<string>("");
+  const levelsRef = useRef({ entryPrice, stopLoss, tp1Price, tp2Price });
 
   const chartData = useMemo(() => {
     if (candles && candles.length > 5) return candles;
     return generateBreakoutCandles(entryPrice, stopLoss);
   }, [candles, entryPrice, stopLoss]);
 
-  // 1. Initialize Chart Instance Once
+  // 1. Initialize Chart Instance Once per Symbol/Height (never tear down canvas on live price ticks)
   useEffect(() => {
     const container = chartContainerRef.current;
     if (!container) return;
 
     // Clear any leftover canvas elements to prevent duplicate rendering
     container.innerHTML = "";
+    fittedKeyRef.current = "";
 
+    const initEntry = levelsRef.current.entryPrice;
     const precision =
-      entryPrice < 0.01 ? 6 : entryPrice < 1 ? 5 : entryPrice < 100 ? 4 : 2;
+      initEntry < 0.01 ? 6 : initEntry < 1 ? 5 : initEntry < 100 ? 4 : 2;
     const minMove = Number((1 / Math.pow(10, precision)).toFixed(precision));
 
     const chart = createChart(container, {
@@ -153,12 +157,21 @@ export default function TradingChart({
         precision,
         minMove,
       },
-      // FIX 1: Force chart Y-axis to always include SL, Entry, TP1, and TP2 lines!
-           // FIX 1: Force chart Y-axis to always include SL, Entry, TP1, and TP2 lines!
-      autoscaleInfoProvider: (original: () => { priceRange: { minValue: number; maxValue: number } | null } | null) => {
+      // Force chart Y-axis to always include live SL, Entry, TP1, and TP2 lines via ref
+      autoscaleInfoProvider: (
+        original: () => {
+          priceRange: { minValue: number; maxValue: number } | null;
+        } | null
+      ) => {
         const res = original();
         if (res !== null && res.priceRange !== null) {
-          const prices = [entryPrice, stopLoss, tp1Price, tp2Price].filter((p) => p > 0);
+          const lv = levelsRef.current;
+          const prices = [
+            lv.entryPrice,
+            lv.stopLoss,
+            lv.tp1Price,
+            lv.tp2Price,
+          ].filter((p) => p > 0);
           if (prices.length > 0) {
             const minLine = Math.min(...prices);
             const maxLine = Math.max(...prices);
@@ -193,10 +206,11 @@ export default function TradingChart({
       chartInstanceRef.current = null;
       chart.remove();
     };
-  }, [height, symbol, entryPrice, stopLoss, tp1Price, tp2Price]); // <-- Prices ko dependencies mein add kiya taake change par chart update ho
+  }, [height, symbol]);
 
   // 2. Update Candles & Single Clean Set of Price Lines Without Duplicating
   useEffect(() => {
+    levelsRef.current = { entryPrice, stopLoss, tp1Price, tp2Price };
     const series = seriesRef.current;
     const chart = chartInstanceRef.current;
     if (!series || !chart) return;
@@ -280,8 +294,12 @@ export default function TradingChart({
       );
     }
 
-    chart.timeScale().fitContent();
-  }, [chartData, entryPrice, stopLoss, tp1Price, tp2Price]);
+    const fitKey = `${symbol}:${timeframe}`;
+    if (fittedKeyRef.current !== fitKey) {
+      fittedKeyRef.current = fitKey;
+      chart.timeScale().fitContent();
+    }
+  }, [chartData, symbol, timeframe, entryPrice, stopLoss, tp1Price, tp2Price]);
 
   return (
     <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-4 backdrop-blur-xl">

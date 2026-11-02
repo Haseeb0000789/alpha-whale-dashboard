@@ -1,4 +1,4 @@
-﻿// components/SignalModal.tsx
+// components/SignalModal.tsx
 "use client";
 
 import React, { useMemo, useEffect, useState } from "react";
@@ -6,11 +6,13 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Signal,
-  OHLCCandle, // <--- NAYA IMPORT
+  OHLCCandle,
+  DepthPoint,
   formatCryptoPrice,
   formatPatternName,
   formatRelativeTime,
 } from "@/types/types";
+import { resolveApiBase } from "@/context/DashboardSocketContext";
 import TradingChart from "./TradingChart";
 import DepthChart from "./DepthChart";
 import {
@@ -45,33 +47,61 @@ export default function SignalModal({
   onBlacklist,
   isBlacklisting = false,
 }: SignalModalProps) {
-  // FIX 2: Real Candles State
-  const [liveCandles, setLiveCandles] = useState<OHLCCandle[] | undefined>(undefined);
+  const [fetchedMarket, setFetchedMarket] = useState<{
+    symbol: string;
+    ohlc?: OHLCCandle[];
+    depth?: DepthPoint[];
+    bidAskRatio?: number | null;
+  } | null>(null);
 
-  // FIX 2: Fetch Real Data for the Modal
+  const activeSym = signal ? signal.symbol.trim().toUpperCase() : "";
+  const liveCandles =
+    fetchedMarket && fetchedMarket.symbol === activeSym
+      ? fetchedMarket.ohlc
+      : undefined;
+  const liveDepth =
+    fetchedMarket && fetchedMarket.symbol === activeSym
+      ? fetchedMarket.depth
+      : undefined;
+  const liveBidAskRatio =
+    fetchedMarket && fetchedMarket.symbol === activeSym
+      ? fetchedMarket.bidAskRatio
+      : undefined;
+
+  // Fetch Real OHLC Candles + Real L2 Depth for the Modal via protocol-aware API base
   useEffect(() => {
-    if (!signal) {
-      setLiveCandles(undefined);
-      return;
-    }
+    if (!activeSym) return;
     let active = true;
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    
-    fetch(`${API_BASE}/api/coin/${encodeURIComponent(signal.symbol.trim().toUpperCase())}`, {
+    const apiBase = resolveApiBase();
+
+    fetch(`${apiBase}/api/coin/${encodeURIComponent(activeSym)}`, {
       cache: "no-store",
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (active && data?.ohlc && data.ohlc.length > 5) {
-          setLiveCandles(data.ohlc);
-        }
+        if (!active || !data) return;
+        setFetchedMarket({
+          symbol: activeSym,
+          ohlc:
+            Array.isArray(data.ohlc) && data.ohlc.length > 5
+              ? data.ohlc
+              : undefined,
+          depth:
+            Array.isArray(data.depth) && data.depth.length > 0
+              ? data.depth
+              : undefined,
+          bidAskRatio:
+            typeof data.bid_ask_ratio === "number"
+              ? data.bid_ask_ratio
+              : undefined,
+        });
       })
       .catch(() => {});
-      
+
     return () => {
       active = false;
     };
-  }, [signal]);
+  }, [activeSym]);
 
   const tradeMetrics = useMemo(() => {
     if (!signal) return null;
@@ -283,7 +313,7 @@ export default function SignalModal({
                 stopLoss={tradeMetrics.sl}
                 tp1Price={tradeMetrics.tp1}
                 tp2Price={tradeMetrics.tp2}
-                candles={liveCandles} /* <--- YAHAN REAL CANDLES PASS HO RAHI HAIN */
+                candles={liveCandles}
                 height={250}
               />
 
@@ -377,6 +407,8 @@ export default function SignalModal({
                 midPrice={tradeMetrics.entryHigh}
                 wallPrice={signal.wall_price}
                 wallUsd={signal.wall_usd}
+                depthData={liveDepth}
+                bidAskRatio={liveBidAskRatio ?? signal.bid_ask_ratio}
                 height={195}
               />
 

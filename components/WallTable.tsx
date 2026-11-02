@@ -25,10 +25,7 @@ interface WallTableProps {
 
 type SortKey = "relevance" | "usd_value" | "proximity" | "respect_rate";
 
-// ---------------------------------------------------------------------------
-// FIX #1: moved ABOVE the component so useMemo sort can use it safely
 // Handles mixed backends: 0.75 (fraction) → 75 (percent), 75 → 75
-// ---------------------------------------------------------------------------
 function normalizeRespectPct(raw?: number): number {
   if (raw === undefined || raw === null) return 75;
   return raw <= 1 ? Math.round(raw * 100) : Math.round(raw);
@@ -56,9 +53,15 @@ export default function WallTable({
   const [sortKey, setSortKey] = useState<SortKey>("relevance");
   const [nowMs, setNowMs] = useState<number>(0);
 
+  // Update relative-time clock on mount + 30s interval (never thrash on every 2.5s WS tick)
   useEffect(() => {
-    setNowMs(Date.now());
-  }, [walls]);
+    const initId = setTimeout(() => setNowMs(Date.now()), 0);
+    const id = setInterval(() => setNowMs(Date.now()), 30000);
+    return () => {
+      clearTimeout(initId);
+      clearInterval(id);
+    };
+  }, []);
 
   const sortedWalls = useMemo(() => {
     const map = new Map<string, BidWall>();
@@ -76,31 +79,40 @@ export default function WallTable({
 
     const list = Array.from(map.values());
     return list.sort((a, b) => {
-      // 1. Relevance — highest score first, then tightest distance
+      const symA = a.symbol.trim().toUpperCase();
+      const symB = b.symbol.trim().toUpperCase();
+
+      // 1. Relevance — bucketed by 2 pts to prevent micro-tick jitter, then tightest distance, then symbol
       if (sortKey === "relevance") {
-        const relA = a.relevance_score ?? a.entry_score ?? 50;
-        const relB = b.relevance_score ?? b.entry_score ?? 50;
+        const relA = Math.round((a.relevance_score ?? a.entry_score ?? 50) / 2) * 2;
+        const relB = Math.round((b.relevance_score ?? b.entry_score ?? 50) / 2) * 2;
         if (relB !== relA) return relB - relA;
-        return (a.distance_pct ?? 1) - (b.distance_pct ?? 1);
+        const distDiff =
+          Math.round(((a.distance_pct ?? 1) - (b.distance_pct ?? 1)) * 10) / 10;
+        if (distDiff !== 0) return distDiff;
+        return symA.localeCompare(symB);
       }
 
       // 2. Proximity — closest wall to mid-price first
       if (sortKey === "proximity") {
-        return (a.distance_pct ?? 99) - (b.distance_pct ?? 99);
+        const diff = (a.distance_pct ?? 99) - (b.distance_pct ?? 99);
+        if (Math.abs(diff) > 0.02) return diff;
+        return symA.localeCompare(symB);
       }
 
       // 3. Size — biggest USD wall first
       if (sortKey === "usd_value") {
-        return b.usd_value - a.usd_value;
+        if (b.usd_value !== a.usd_value) return b.usd_value - a.usd_value;
+        return symA.localeCompare(symB);
       }
 
-      // 4. FIX #2: Respect % — highest respected first (100% → 80% → ... → 0%)
-      //    Tie-breaker: larger USD wall wins
+      // 4. Respect % — highest respected first, tie-breaker larger USD wall, then symbol
       const respDiff =
         normalizeRespectPct(b.respect_rate) -
         normalizeRespectPct(a.respect_rate);
       if (respDiff !== 0) return respDiff;
-      return b.usd_value - a.usd_value;
+      if (b.usd_value !== a.usd_value) return b.usd_value - a.usd_value;
+      return symA.localeCompare(symB);
     });
   }, [walls, sortKey]);
 
@@ -211,7 +223,7 @@ export default function WallTable({
                         : `Active Bid Support`,
                       wall.scans_seen && wall.scans_seen >= 2
                         ? `Persistent (${wall.scans_seen} scans held)`
-                        : `Ask Vacuum Detected`,
+                        : `Bid Liquidity Cluster`,
                     ];
 
               const warnings =
