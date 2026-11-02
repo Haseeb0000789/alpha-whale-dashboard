@@ -47,6 +47,8 @@ const PATTERN_OPTIONS = [
   { value: "ascending_triangle", label: "Ascending Triangle" },
   { value: "bullish_pennant", label: "Bullish Pennant" },
   { value: "bullish_flag", label: "Bullish Flag" },
+  { value: "descending_trendline", label: "Descending Trendline" },
+  { value: "horizontal_resistance", label: "Horizontal Resistance" },
   { value: "vwap_ema_pullback", label: "VWAP / EMA Pullback (Scalp)" },
   { value: "liquidity_sweep_breakout", label: "Liquidity Sweep Breakout" },
   { value: "order_block_bounce", label: "Order Block Bounce" },
@@ -178,20 +180,28 @@ export default function SignalsGridPage() {
   const activeSpotPool = useMemo(() => wsSpotSignals ?? [], [wsSpotSignals]);
   const rawDataset = marketTab === "ALPHA" ? signals : activeSpotPool;
 
-  // Enforce Control Panel Active Strategy Filters (enabled_timeframes & enabled_patterns) in 0ms
+  // Enforce Control Panel Active Strategy Filters (enabled_timeframes & enabled_patterns) case-insensitively in 0ms
   const baseDataset = useMemo(() => {
-    const enabledTfs = settings?.enabled_timeframes;
-    const enabledPats = settings?.enabled_patterns;
+    const rawTfs = settings?.enabled_timeframes;
+    const rawPats = settings?.enabled_patterns;
+    const enabledTfs = Array.isArray(rawTfs)
+      ? new Set(rawTfs.map((t) => String(t).trim().toLowerCase()))
+      : null;
+    const enabledPats = Array.isArray(rawPats)
+      ? new Set(rawPats.map((p) => String(p).trim().toLowerCase()))
+      : null;
     return rawDataset.filter((s) => {
-      if (Array.isArray(enabledTfs) && !enabledTfs.includes(s.timeframe)) {
+      const tf = String(s.timeframe || "").trim().toLowerCase();
+      const pat = String(s.structure || "").trim().toLowerCase();
+      if (enabledTfs && !enabledTfs.has(tf)) {
         return false;
       }
-      if (Array.isArray(enabledPats) && !enabledPats.includes(s.structure)) {
+      if (enabledPats && !enabledPats.has(pat)) {
         return false;
       }
       return true;
     });
-  }, [rawDataset, settings?.enabled_timeframes, settings?.enabled_patterns]);
+  }, [rawDataset, settings]);
 
   // Update relative-time clock on mount + when signals arrive + 30s interval
   useEffect(() => {
@@ -387,6 +397,17 @@ export default function SignalsGridPage() {
             onClick={() => {
               setMarketTab("ALPHA");
               setOutcomeFilter("ALL");
+              setSpotStyleFilter("ALL");
+              if (
+                selectedPattern !== "ALL" &&
+                !signals.some(
+                  (s) =>
+                    String(s.structure || "").toLowerCase() ===
+                    selectedPattern.toLowerCase()
+                )
+              ) {
+                setSelectedPattern("ALL");
+              }
             }}
             className={`relative flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-xs font-black tracking-wide transition-all sm:text-sm ${
               marketTab === "ALPHA"
@@ -410,6 +431,23 @@ export default function SignalsGridPage() {
             onClick={() => {
               setMarketTab("SPOT");
               setOutcomeFilter("ALL");
+              setSpotStyleFilter("ALL");
+              if (selectedTf === "1d") {
+                setSelectedTf("ALL");
+              }
+              if (
+                selectedPattern !== "ALL" &&
+                !activeSpotPool.some(
+                  (s) =>
+                    String(s.structure || "").toLowerCase() ===
+                    selectedPattern.toLowerCase()
+                )
+              ) {
+                setSelectedPattern("ALL");
+              }
+              if (activeSpotPool.length === 0) {
+                triggerRefresh();
+              }
             }}
             className={`relative flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-xs font-black tracking-wide transition-all sm:text-sm ${
               marketTab === "SPOT"
@@ -765,14 +803,41 @@ export default function SignalsGridPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {filteredSignals.map((sig) => {
-                const cleanSym = sig.symbol.trim().toUpperCase();
-                const stableKey = sig.id
-                  ? `${marketTab}-${sig.id}`
-                  : `${marketTab}-${cleanSym}-${sig.timeframe}-${sig.detected_at || ""}`;
-                const entryVal =
-                  sig.entry_high || sig.breakout_price || sig.entry_low;
+            <AnimatePresence initial={false}>
+              {filteredSignals.map((sig, idx) => {
+                const cleanSym = (sig.symbol || "").trim().toUpperCase();
+                const stableKey =
+                  marketTab === "SPOT"
+                    ? `SPOT-${cleanSym}-${sig.timeframe}`
+                    : sig.id
+                    ? `ALPHA-${sig.id}`
+                    : `ALPHA-${cleanSym}-${sig.timeframe}-${sig.detected_at || idx}`;
+
+                const rawEntry =
+                  Number(sig.entry_high) ||
+                  Number(sig.breakout_price) ||
+                  Number(sig.entry_low) ||
+                  Number(sig.level_price) ||
+                  0;
+                const entryVal = rawEntry > 0 ? rawEntry : undefined;
+                const stopLossVal =
+                  Number(sig.stop_loss) > 0
+                    ? Number(sig.stop_loss)
+                    : entryVal
+                    ? entryVal * 0.985
+                    : undefined;
+                const tp1Val =
+                  Number(sig.tp1_price) > 0
+                    ? Number(sig.tp1_price)
+                    : entryVal
+                    ? entryVal * 1.0185
+                    : undefined;
+                const tp2Val =
+                  Number(sig.tp2_price) > 0
+                    ? Number(sig.tp2_price)
+                    : entryVal
+                    ? entryVal * 1.036
+                    : undefined;
 
                 const effectiveNowMs = Math.max(nowMs, getSyncedNowMs());
                 const sigTimeMs = parseUtcTimestampMs(sig.detected_at);
@@ -794,8 +859,8 @@ export default function SignalsGridPage() {
                     : "SCALP");
 
                 const tp1Pct =
-                  entryVal && sig.tp1_price
-                    ? (((sig.tp1_price - entryVal) / entryVal) * 100).toFixed(1)
+                  entryVal && tp1Val
+                    ? (((tp1Val - entryVal) / entryVal) * 100).toFixed(1)
                     : "1.8";
 
                 return (
@@ -920,29 +985,43 @@ export default function SignalsGridPage() {
                     </div>
 
                     <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-2.5 text-center">
-                        <span className="block text-[10px] font-semibold uppercase text-cyan-300/80">
+                      <div className="min-w-0 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-2.5 text-center">
+                        <span className="block truncate text-[10px] font-semibold uppercase text-cyan-300/80">
                           Entry
                         </span>
-                        <span className="mt-0.5 block font-mono text-xs font-bold text-white">
+                        <span
+                          className="mt-0.5 block truncate font-mono text-xs font-bold text-white"
+                          title={`$${formatCryptoPrice(entryVal)}`}
+                        >
                           ${formatCryptoPrice(entryVal)}
                         </span>
                       </div>
-                      <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.07] p-2.5 text-center">
-                        <span className="block text-[10px] font-semibold uppercase text-rose-300/80">
+                      <div className="min-w-0 rounded-xl border border-rose-500/25 bg-rose-500/[0.07] p-2.5 text-center">
+                        <span className="block truncate text-[10px] font-semibold uppercase text-rose-300/80">
                           Stop Loss
                         </span>
-                        <span className="mt-0.5 block font-mono text-xs font-bold text-rose-400">
-                          ${formatCryptoPrice(sig.stop_loss)}
+                        <span
+                          className="mt-0.5 block truncate font-mono text-xs font-bold text-rose-400"
+                          title={`$${formatCryptoPrice(stopLossVal)}`}
+                        >
+                          ${formatCryptoPrice(stopLossVal)}
                         </span>
                       </div>
-                      <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-2.5 text-center">
-                        <span className="block text-[10px] font-semibold uppercase text-emerald-300/80">
+                      <div className="min-w-0 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-2.5 text-center">
+                        <span className="block truncate text-[10px] font-semibold uppercase text-emerald-300/80">
                           TP1 (+{tp1Pct}%)
                         </span>
-                        <span className="mt-0.5 block font-mono text-xs font-bold text-emerald-400">
-                          ${formatCryptoPrice(sig.tp1_price)}
+                        <span
+                          className="mt-0.5 block truncate font-mono text-xs font-bold text-emerald-400"
+                          title={`TP1: $${formatCryptoPrice(tp1Val)} | TP2: $${formatCryptoPrice(tp2Val)}`}
+                        >
+                          ${formatCryptoPrice(tp1Val)}
                         </span>
+                        {tp2Val !== undefined && (
+                          <span className="mt-0.5 block truncate font-mono text-[10px] font-medium text-emerald-300/75">
+                            TP2: ${formatCryptoPrice(tp2Val)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </motion.div>

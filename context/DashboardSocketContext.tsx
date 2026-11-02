@@ -23,6 +23,7 @@ export const ALL_PATTERNS = [
   "bullish_pennant",
   "bullish_flag",
   "descending_trendline",
+  "horizontal_resistance",
   "vwap_ema_pullback",
   "liquidity_sweep_breakout",
   "order_block_bounce",
@@ -65,12 +66,84 @@ function normalizeBotSettings(
   return {
     ...merged,
     enabled_timeframes: Array.isArray(merged.enabled_timeframes)
-      ? merged.enabled_timeframes
+      ? merged.enabled_timeframes.map((tf) => String(tf).trim().toLowerCase())
       : [...ALL_TIMEFRAMES],
     enabled_patterns: Array.isArray(merged.enabled_patterns)
-      ? merged.enabled_patterns
+      ? merged.enabled_patterns.map((p) => String(p).trim().toLowerCase())
       : [...ALL_PATTERNS],
   };
+}
+
+function isSignalStrategyEnabled(sig: Signal, cfg: BotSettings): boolean {
+  const tf = String(sig.timeframe || "").trim().toLowerCase();
+  const pat = String(sig.structure || "").trim().toLowerCase();
+  const enabledTfs = Array.isArray(cfg.enabled_timeframes)
+    ? cfg.enabled_timeframes.map((t) => String(t).trim().toLowerCase())
+    : ALL_TIMEFRAMES;
+  const enabledPats = Array.isArray(cfg.enabled_patterns)
+    ? cfg.enabled_patterns.map((p) => String(p).trim().toLowerCase())
+    : ALL_PATTERNS;
+  return enabledTfs.includes(tf) && enabledPats.includes(pat);
+}
+
+function mergeSignalStream(
+  prev: Signal[],
+  incoming: Signal[],
+  cfg: BotSettings,
+  preserveOnTransientEmpty: boolean
+): Signal[] {
+  const filteredIncoming = incoming.filter((s) =>
+    isSignalStrategyEnabled(s, cfg)
+  );
+  if (
+    preserveOnTransientEmpty &&
+    filteredIncoming.length === 0 &&
+    prev.length > 0 &&
+    cfg.enabled_timeframes.length > 0 &&
+    cfg.enabled_patterns.length > 0
+  ) {
+    return prev.filter((s) => isSignalStrategyEnabled(s, cfg));
+  }
+
+  const prevBySymTf = new Map<string, Signal>();
+  for (const p of prev) {
+    const k = `${(p.symbol || "").trim().toUpperCase()}:${(
+      p.timeframe || ""
+    )
+      .trim()
+      .toLowerCase()}`;
+    prevBySymTf.set(k, p);
+  }
+
+  const seen = new Set<string>();
+  const merged: Signal[] = [];
+  for (const item of filteredIncoming) {
+    const symTfKey = `${(item.symbol || "").trim().toUpperCase()}:${(
+      item.timeframe || ""
+    )
+      .trim()
+      .toLowerCase()}`;
+    const dedupKey = preserveOnTransientEmpty
+      ? symTfKey
+      : item.id !== undefined && item.id !== null
+      ? `id:${item.id}`
+      : `${symTfKey}:${item.detected_at || ""}`;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+
+    const existing = prevBySymTf.get(symTfKey);
+    if (existing && preserveOnTransientEmpty) {
+      merged.push({
+        ...existing,
+        ...item,
+        id: existing.id ?? item.id,
+        detected_at: existing.detected_at || item.detected_at,
+      });
+    } else {
+      merged.push(item);
+    }
+  }
+  return merged;
 }
 
 interface DashboardSocketState {
@@ -152,6 +225,7 @@ export function DashboardSocketProvider({
   const knownSpotKeysRef = useRef<Set<string>>(new Set());
   const hasSeededAlphaRef = useRef<boolean>(false);
   const hasSeededSpotRef = useRef<boolean>(false);
+  const lastSpotFallbackFetchRef = useRef<number>(0);
   const reconnectFnRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -249,20 +323,18 @@ export function DashboardSocketProvider({
 
       if (setRes.ok) {
         const setJson = await setRes.json();
-        setSettings((prev) => {
-          const merged = normalizeBotSettings(setJson, prev);
-          settingsRef.current = merged;
-          try {
-            localStorage.setItem(
-              LOCAL_STORAGE_SETTINGS_KEY,
-              JSON.stringify(merged)
-            );
-          } catch {}
-          return merged;
-        });
+        const merged = normalizeBotSettings(setJson, settingsRef.current);
+        settingsRef.current = merged;
+        setSettings(merged);
+        try {
+          localStorage.setItem(
+            LOCAL_STORAGE_SETTINGS_KEY,
+            JSON.stringify(merged)
+          );
+        } catch {}
       }
 
-      // Spot signals — independent fetch (endpoint can be temporarily empty)
+      // Spot signals — independent fetch (preserved across transient empty cycles)
       if (spotRes.ok) {
         try {
           const spotData = await spotRes.json();
@@ -270,9 +342,13 @@ export function DashboardSocketProvider({
             ? spotData
             : spotData.signals || spotData.spot_signals || [];
           if (Array.isArray(parsedSpot) && isMountedRef.current) {
-            knownSpotKeysRef.current = new Set(parsedSpot.map(signalIdentityKey));
+            for (const s of parsedSpot) {
+              knownSpotKeysRef.current.add(signalIdentityKey(s));
+            }
             hasSeededSpotRef.current = true;
-            setSpotSignals(parsedSpot);
+            setSpotSignals((prev) =>
+              mergeSignalStream(prev, parsedSpot, settingsRef.current, true)
+            );
           }
         } catch {
           // Ignore malformed spot payload
@@ -300,7 +376,9 @@ export function DashboardSocketProvider({
         syncServerClock(serverDateHeader, parsedSignals);
         knownAlphaKeysRef.current = new Set(parsedSignals.map(signalIdentityKey));
         hasSeededAlphaRef.current = true;
-        setSignals(parsedSignals);
+        setSignals((prev) =>
+          mergeSignalStream(prev, parsedSignals, settingsRef.current, false)
+        );
         setStats(statsData);
         setWalls(Array.isArray(wallsData) ? wallsData : wallsData.walls || []);
         setIsInitialLoading(false);
@@ -349,31 +427,55 @@ export function DashboardSocketProvider({
           // Explicit NEW_SIGNAL event (alpha signals only)
           if (payload.type === "NEW_SIGNAL" && payload.data) {
             const incoming: Signal = payload.data;
+            if (!isSignalStrategyEnabled(incoming, settingsRef.current)) return;
             knownAlphaKeysRef.current.add(signalIdentityKey(incoming));
             hasSeededAlphaRef.current = true;
             playAlarm(incoming.confidence);
-            setSignals((prev) => [incoming, ...prev]);
+            setSignals((prev) =>
+              mergeSignalStream(
+                prev,
+                [incoming, ...prev],
+                settingsRef.current,
+                false
+              )
+            );
             return;
           }
 
           // Explicit NEW_SPOT_SIGNAL event
           if (payload.type === "NEW_SPOT_SIGNAL" && payload.data) {
             const incoming: Signal = payload.data;
+            if (!isSignalStrategyEnabled(incoming, settingsRef.current)) return;
             knownSpotKeysRef.current.add(signalIdentityKey(incoming));
             hasSeededSpotRef.current = true;
             playAlarm(incoming.confidence);
-            setSpotSignals((prev) => [incoming, ...prev]);
+            setSpotSignals((prev) =>
+              mergeSignalStream(
+                prev,
+                [incoming, ...prev],
+                settingsRef.current,
+                true
+              )
+            );
             return;
           }
 
           if (payload.type === "snapshot") {
+            let activeCfg = settingsRef.current;
+            if (payload.settings) {
+              activeCfg = normalizeBotSettings(payload.settings, activeCfg);
+              settingsRef.current = activeCfg;
+            }
+
             syncServerClock(
               payload.timestamp,
               Array.isArray(payload.signals) ? payload.signals : undefined
             );
             // Check for genuinely new high-score (>=75) Alpha signals
             if (Array.isArray(payload.signals)) {
-              const incomingAlpha: Signal[] = payload.signals;
+              const incomingAlpha: Signal[] = payload.signals.filter((s: Signal) =>
+                isSignalStrategyEnabled(s, activeCfg)
+              );
               if (hasSeededAlphaRef.current) {
                 let maxNewScore = -1;
                 for (const s of incomingAlpha) {
@@ -394,49 +496,82 @@ export function DashboardSocketProvider({
 
             // Check for genuinely new high-score (>=75) Spot signals
             if (Array.isArray(payload.spot_signals)) {
-              const incomingSpot: Signal[] = payload.spot_signals;
-              if (hasSeededSpotRef.current) {
-                let maxNewSpotScore = -1;
-                for (const s of incomingSpot) {
-                  const key = signalIdentityKey(s);
-                  if (!knownSpotKeysRef.current.has(key)) {
-                    maxNewSpotScore = Math.max(
-                      maxNewSpotScore,
-                      s.confidence ?? 0
-                    );
+              const incomingSpot: Signal[] = payload.spot_signals.filter(
+                (s: Signal) => isSignalStrategyEnabled(s, activeCfg)
+              );
+              if (incomingSpot.length > 0) {
+                if (hasSeededSpotRef.current) {
+                  let maxNewSpotScore = -1;
+                  for (const s of incomingSpot) {
+                    const key = signalIdentityKey(s);
+                    if (!knownSpotKeysRef.current.has(key)) {
+                      maxNewSpotScore = Math.max(
+                        maxNewSpotScore,
+                        s.confidence ?? 0
+                      );
+                    }
+                  }
+                  if (maxNewSpotScore >= 75) {
+                    playAlarm(maxNewSpotScore);
                   }
                 }
-                if (maxNewSpotScore >= 75) {
-                  playAlarm(maxNewSpotScore);
+                for (const s of incomingSpot) {
+                  knownSpotKeysRef.current.add(signalIdentityKey(s));
                 }
+                hasSeededSpotRef.current = true;
+              } else if (
+                Date.now() - lastSpotFallbackFetchRef.current > 15000 &&
+                activeCfg.enabled_timeframes.length > 0 &&
+                activeCfg.enabled_patterns.length > 0
+              ) {
+                // If WS snapshot arrived before the Spot scanner completed its first pass,
+                // trigger a non-blocking REST request to `/api/signals/spot`.
+                lastSpotFallbackFetchRef.current = Date.now();
+                const apiBase = resolveApiBase();
+                fetch(`${apiBase}/api/signals/spot`, { cache: "no-store" })
+                  .then((r) => (r.ok ? r.json() : null))
+                  .then((spotJson) => {
+                    if (!spotJson || !isMountedRef.current) return;
+                    const parsed: Signal[] = Array.isArray(spotJson)
+                      ? spotJson
+                      : spotJson.signals || spotJson.spot_signals || [];
+                    if (parsed.length > 0) {
+                      setSpotSignals((prev) =>
+                        mergeSignalStream(
+                          prev,
+                          parsed,
+                          settingsRef.current,
+                          true
+                        )
+                      );
+                    }
+                  })
+                  .catch(() => {});
               }
-              knownSpotKeysRef.current = new Set(
-                incomingSpot.map(signalIdentityKey)
-              );
-              hasSeededSpotRef.current = true;
             }
 
             startTransition(() => {
-              if (Array.isArray(payload.signals)) setSignals(payload.signals);
-              if (Array.isArray(payload.spot_signals))
-                setSpotSignals(payload.spot_signals);
+              if (payload.settings) {
+                setSettings(activeCfg);
+                try {
+                  localStorage.setItem(
+                    LOCAL_STORAGE_SETTINGS_KEY,
+                    JSON.stringify(activeCfg)
+                  );
+                } catch {}
+              }
+              if (Array.isArray(payload.signals)) {
+                setSignals((prev) =>
+                  mergeSignalStream(prev, payload.signals, activeCfg, false)
+                );
+              }
+              if (Array.isArray(payload.spot_signals)) {
+                setSpotSignals((prev) =>
+                  mergeSignalStream(prev, payload.spot_signals, activeCfg, true)
+                );
+              }
               if (payload.stats) setStats(payload.stats);
               if (Array.isArray(payload.walls)) setWalls(payload.walls);
-
-              // Update settings if sent via WebSocket
-              if (payload.settings) {
-                setSettings((prev) => {
-                  const merged = normalizeBotSettings(payload.settings, prev);
-                  settingsRef.current = merged;
-                  try {
-                    localStorage.setItem(
-                      LOCAL_STORAGE_SETTINGS_KEY,
-                      JSON.stringify(merged)
-                    );
-                  } catch {}
-                  return merged;
-                });
-              }
 
               if (payload.timestamp) setLastUpdated(payload.timestamp);
               setIsInitialLoading(false);
@@ -508,13 +643,20 @@ export function DashboardSocketProvider({
   // 3. Instant Optimistic Save + Backend Persistence
   const saveBotSettings = useCallback(
     async (newSettings: BotSettings): Promise<boolean> => {
-      // Update Context & localStorage in 0ms so UI NEVER reverts to 55!
-      settingsRef.current = newSettings;
-      setSettings(newSettings);
+      const normalized = normalizeBotSettings(newSettings, settingsRef.current);
+      // Update Context, active signal streams & localStorage in 0ms
+      settingsRef.current = normalized;
+      setSettings(normalized);
+      setSignals((prev) =>
+        prev.filter((s) => isSignalStrategyEnabled(s, normalized))
+      );
+      setSpotSignals((prev) =>
+        prev.filter((s) => isSignalStrategyEnabled(s, normalized))
+      );
       try {
         localStorage.setItem(
           LOCAL_STORAGE_SETTINGS_KEY,
-          JSON.stringify(newSettings)
+          JSON.stringify(normalized)
         );
       } catch {}
 
@@ -523,17 +665,18 @@ export function DashboardSocketProvider({
         const res = await fetch(`${apiBase}/api/settings`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newSettings),
+          body: JSON.stringify(normalized),
         });
         if (!res.ok) return false;
         const data = await res.json();
         if (data?.settings) {
-          settingsRef.current = data.settings;
-          setSettings(data.settings);
+          const synced = normalizeBotSettings(data.settings, normalized);
+          settingsRef.current = synced;
+          setSettings(synced);
           try {
             localStorage.setItem(
               LOCAL_STORAGE_SETTINGS_KEY,
-              JSON.stringify(data.settings)
+              JSON.stringify(synced)
             );
           } catch {}
         }
