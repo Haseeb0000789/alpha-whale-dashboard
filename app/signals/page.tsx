@@ -950,14 +950,6 @@ export default function SignalsGridPage() {
           </div>
         )}
       </div>
-
-      <button
-        onClick={triggerRefresh}
-        aria-label="Refresh Signals"
-        className="fixed bottom-24 right-5 md:bottom-6 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/50 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-lg md:hidden"
-      >
-        <RefreshCw className="h-5 w-5" />
-      </button>
     </main>
   );
 }

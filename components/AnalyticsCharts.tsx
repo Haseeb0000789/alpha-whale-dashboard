@@ -73,7 +73,7 @@ export default function AnalyticsCharts({
     const refNow = mountedDate ?? new Date(0);
     const buckets = new Map<
       string,
-      { total: number; finalized: number; wins: number; netPnlSum: number }
+      { total: number; finalized: number; wins: number; losses: number; netPnlSum: number }
     >();
 
     for (let i = 6; i >= 0; i--) {
@@ -84,6 +84,7 @@ export default function AnalyticsCharts({
         total: 0,
         finalized: 0,
         wins: 0,
+        losses: 0,
         netPnlSum: 0,
       });
     }
@@ -116,12 +117,13 @@ export default function AnalyticsCharts({
           entry > 0 && s.tp1_price > entry
             ? ((s.tp1_price - entry) / entry) * 100
             : s.max_gain_pct || avgGain;
-        // 50% booked at TP1 + 50% runner protected at +0.25% fee-adjusted BE
-        b.netPnlSum += Math.max(0.4, tp1Pct * 0.5 + 0.125);
+        // 50% booked at TP1 + 50% runner protected at +0.20% fee-adjusted BE
+        b.netPnlSum += Math.max(0.4, tp1Pct * 0.5 + 0.10);
       } else if (s.breakeven_exit || st === "BREAKEVEN") {
-        // Fee-adjusted trailing breakeven (+0.25% gross -> ~0.05% net saved)
-        b.netPnlSum += 0.05;
+        // Fee-adjusted trailing breakeven (+0.20% gross -> ~0.04% net saved)
+        b.netPnlSum += 0.04;
       } else if (s.hit_sl || st === "SL_HIT") {
+        b.losses += 1;
         const slPct =
           entry > 0 && s.stop_loss > 0 && s.stop_loss < entry
             ? ((entry - s.stop_loss) / entry) * 100
@@ -153,8 +155,11 @@ export default function AnalyticsCharts({
       let sigCount = b?.total ?? 0;
 
       if (b && b.finalized > 0) {
-        dayWinRate = Number(((b.wins / b.finalized) * 100).toFixed(1));
-        carryWinRate = dayWinRate;
+        const decisive = b.wins + b.losses;
+        if (decisive > 0) {
+          dayWinRate = Number(((b.wins / decisive) * 100).toFixed(1));
+          carryWinRate = dayWinRate;
+        }
         // Normalize daily portfolio impact assuming 20% allocation per setup (capped to realistic daily turnover)
         const avgSetupPnl = b.netPnlSum / b.finalized;
         const effectiveTrades = Math.min(b.finalized, 5);
@@ -428,6 +433,7 @@ export default function AnalyticsCharts({
                 const wr = Math.round(item.win_rate_pct ?? 0);
                 const wins = item.wins ?? 0;
                 const losses = item.losses ?? 0;
+                const be = item.breakeven ?? 0;
                 return (
                   <div
                     key={item.structure}
@@ -450,7 +456,7 @@ export default function AnalyticsCharts({
                         [ {wr}% Win ]
                       </span>
                       <span className="font-semibold text-slate-300">
-                        ({wins}W / {losses}L)
+                        ({wins}W / {losses}L • {be}BE)
                       </span>
                     </div>
                   </div>
@@ -476,6 +482,7 @@ export default function AnalyticsCharts({
                 const wr = Math.round(tf.win_rate_pct ?? 0);
                 const wins = tf.wins ?? 0;
                 const losses = tf.losses ?? 0;
+                const be = tf.breakeven ?? 0;
                 return (
                   <div
                     key={tf.timeframe}
@@ -498,7 +505,7 @@ export default function AnalyticsCharts({
                         [ {wr}% Win ]
                       </span>
                       <span className="font-semibold text-slate-300">
-                        ({wins}W / {losses}L)
+                        ({wins}W / {losses}L • {be}BE)
                       </span>
                     </div>
                   </div>

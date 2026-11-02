@@ -6,10 +6,10 @@ import Link from "next/link";
 import StatsCards from "@/components/StatsCards";
 import AnalyticsCharts from "@/components/AnalyticsCharts";
 import { useDashboardSocket } from "@/context/DashboardSocketContext";
-import { Zap, Shield, ArrowUpRight, RefreshCw } from "lucide-react";
+import { Zap, Shield, ArrowUpRight } from "lucide-react";
 
 export default function DashboardOverviewPage() {
-  const { signals, spotSignals, stats, walls, isInitialLoading, triggerRefresh } =
+  const { signals, spotSignals, stats, walls, isInitialLoading } =
     useDashboardSocket();
   const [startOfDay, setStartOfDay] = useState<Date | null>(null);
 
@@ -103,14 +103,6 @@ export default function DashboardOverviewPage() {
           <ArrowUpRight className="h-4 w-4 text-slate-400 group-hover:text-emerald-400" />
         </Link>
       </div>
-
-      <button
-        onClick={triggerRefresh}
-        aria-label="Refresh Data"
-        className="fixed bottom-24 right-5 md:bottom-6 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-cyan-400/50 bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-lg md:hidden"
-      >
-        <RefreshCw className="h-4 w-4" />
-      </button>
     </main>
   );
 }
