@@ -38,6 +38,7 @@ export const DEFAULT_SETTINGS: BotSettings = {
 
 interface DashboardSocketState {
   signals: Signal[];
+  spotSignals: Signal[];
   stats: SignalStats | null;
   walls: BidWall[];
   settings: BotSettings;
@@ -50,6 +51,7 @@ interface DashboardSocketState {
 
 const DashboardSocketContext = createContext<DashboardSocketState>({
   signals: [],
+  spotSignals: [],
   stats: null,
   walls: [],
   settings: DEFAULT_SETTINGS,
@@ -85,6 +87,7 @@ export function DashboardSocketProvider({
   children: React.ReactNode;
 }) {
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [spotSignals, setSpotSignals] = useState<Signal[]>([]);
   const [stats, setStats] = useState<SignalStats | null>(null);
   const [walls, setWalls] = useState<BidWall[]>([]);
   const [settings, setSettings] = useState<BotSettings>(DEFAULT_SETTINGS);
@@ -99,11 +102,13 @@ export function DashboardSocketProvider({
   // --- AUDIO ALARM SETUP (Safari & Mobile Fix) ---
   const audioCtxRef = useRef<AudioContext | null>(null);
   const prevSignalsCountRef = useRef(0);
+  const prevSpotSignalsCountRef = useRef(0);
 
   useEffect(() => {
     const unlockAudio = () => {
       if (!audioCtxRef.current) {
-        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        const AudioContext =
+          window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContext) {
           audioCtxRef.current = new AudioContext();
         }
@@ -130,7 +135,7 @@ export function DashboardSocketProvider({
 
       oscillator.type = "sine";
       oscillator.frequency.setValueAtTime(880, ctx.currentTime); // 880Hz beep
-      
+
       gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
       gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
 
@@ -156,12 +161,13 @@ export function DashboardSocketProvider({
     }
   }, []);
 
-  // 2. Fetch initial HTTP snapshot + saved backend settings
+  // 2. Fetch initial HTTP snapshot (alpha + spot signals) + saved backend settings
   const fetchInitialHttpSnapshot = useCallback(async () => {
     const apiBase = resolveApiBase();
     try {
-      const [sigRes, statsRes, wallsRes, setRes] = await Promise.all([
+      const [sigRes, spotRes, statsRes, wallsRes, setRes] = await Promise.all([
         fetch(`${apiBase}/api/signals`, { cache: "no-store" }),
+        fetch(`${apiBase}/api/signals/spot`, { cache: "no-store" }),
         fetch(`${apiBase}/api/signals/stats`, { cache: "no-store" }),
         fetch(`${apiBase}/api/walls/active`, { cache: "no-store" }),
         fetch(`${apiBase}/api/settings`, { cache: "no-store" }),
@@ -172,10 +178,29 @@ export function DashboardSocketProvider({
         setSettings((prev) => {
           const merged = { ...prev, ...setJson };
           try {
-            localStorage.setItem(LOCAL_STORAGE_SETTINGS_KEY, JSON.stringify(merged));
+            localStorage.setItem(
+              LOCAL_STORAGE_SETTINGS_KEY,
+              JSON.stringify(merged)
+            );
           } catch {}
           return merged;
         });
+      }
+
+      // Spot signals — independent fetch (endpoint can be temporarily empty)
+      if (spotRes.ok) {
+        try {
+          const spotData = await spotRes.json();
+          const parsedSpot = Array.isArray(spotData)
+            ? spotData
+            : spotData.signals || spotData.spot_signals || [];
+          if (Array.isArray(parsedSpot)) {
+            prevSpotSignalsCountRef.current = parsedSpot.length;
+            setSpotSignals(parsedSpot);
+          }
+        } catch {
+          // Ignore malformed spot payload
+        }
       }
 
       if (!sigRes.ok || !statsRes.ok || !wallsRes.ok) return;
@@ -187,7 +212,9 @@ export function DashboardSocketProvider({
       ]);
 
       startTransition(() => {
-        const parsedSignals = Array.isArray(sigData) ? sigData : sigData.signals || [];
+        const parsedSignals = Array.isArray(sigData)
+          ? sigData
+          : sigData.signals || [];
         prevSignalsCountRef.current = parsedSignals.length;
         setSignals(parsedSignals);
         setStats(statsData);
@@ -214,28 +241,53 @@ export function DashboardSocketProvider({
       ws.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          
-          // Agar explicit NEW_SIGNAL event aaye
+
+          // Explicit NEW_SIGNAL event (alpha signals only)
           if (payload.type === "NEW_SIGNAL") {
             playAlarm();
             setSignals((prev) => [payload.data, ...prev]);
+            prevSignalsCountRef.current += 1;
+            return;
+          }
+
+          // Explicit NEW_SPOT_SIGNAL event (optional, if backend sends it)
+          if (payload.type === "NEW_SPOT_SIGNAL") {
+            playAlarm();
+            setSpotSignals((prev) => [payload.data, ...prev]);
+            prevSpotSignalsCountRef.current += 1;
             return;
           }
 
           if (payload.type === "snapshot") {
+            // Alpha signals length check
             if (Array.isArray(payload.signals)) {
-              // Check karein ke kya naya signal aaya hai (Length compare karke)
-              if (prevSignalsCountRef.current > 0 && payload.signals.length > prevSignalsCountRef.current) {
+              if (
+                prevSignalsCountRef.current > 0 &&
+                payload.signals.length > prevSignalsCountRef.current
+              ) {
                 playAlarm();
               }
               prevSignalsCountRef.current = payload.signals.length;
             }
 
+            // Spot signals length check (separate ref so counter is clean)
+            if (Array.isArray(payload.spot_signals)) {
+              if (
+                prevSpotSignalsCountRef.current > 0 &&
+                payload.spot_signals.length > prevSpotSignalsCountRef.current
+              ) {
+                playAlarm();
+              }
+              prevSpotSignalsCountRef.current = payload.spot_signals.length;
+            }
+
             startTransition(() => {
               if (Array.isArray(payload.signals)) setSignals(payload.signals);
+              if (Array.isArray(payload.spot_signals))
+                setSpotSignals(payload.spot_signals);
               if (payload.stats) setStats(payload.stats);
               if (Array.isArray(payload.walls)) setWalls(payload.walls);
-              
+
               // Update settings if sent via WebSocket
               if (payload.settings) {
                 setSettings((prev) => {
@@ -341,6 +393,7 @@ export function DashboardSocketProvider({
     <DashboardSocketContext.Provider
       value={{
         signals,
+        spotSignals,
         stats,
         walls,
         settings,

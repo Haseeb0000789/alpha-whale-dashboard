@@ -15,22 +15,48 @@ import {
 } from "lucide-react";
 
 export default function LiveWallsPage() {
-  const { walls, isInitialLoading, triggerRefresh } = useDashboardSocket();
+  const { walls, settings, isInitialLoading, triggerRefresh } =
+    useDashboardSocket();
   const [searchSymbol, setSearchSymbol] = useState<string>("");
   const [selectedWallSymbol, setSelectedWallSymbol] = useState<string>("");
 
+  // Active minimum wall threshold from Control Center (default $5,000)
+  const minWallUsd = settings?.min_wall_usd ?? 5000;
+
   const filteredWalls = useMemo(() => {
-    return walls.filter((w) => {
-      const sym = w.symbol.trim().toUpperCase();
-      if (
-        searchSymbol.trim() &&
-        !sym.toLowerCase().includes(searchSymbol.trim().toLowerCase())
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [walls, searchSymbol]);
+    return walls
+      .map((w) => {
+        // Also filter sub-exchange walls so no <$5k bullet point ever appears
+        const validExWalls = (w.exchange_walls || []).filter(
+          (ew) => ew.usd_value >= minWallUsd
+        );
+        if (w.exchange_walls && w.exchange_walls.length > 0) {
+          if (validExWalls.length === 0) return null;
+          const newTotal = validExWalls.reduce(
+            (sum, ew) => sum + ew.usd_value,
+            0
+          );
+          return {
+            ...w,
+            usd_value: newTotal,
+            exchange_walls: validExWalls,
+          };
+        }
+        return w.usd_value >= minWallUsd ? w : null;
+      })
+      .filter((w): w is NonNullable<typeof w> => {
+        if (!w) return false;
+        if (w.usd_value < minWallUsd) return false;
+        const sym = w.symbol.trim().toUpperCase();
+        if (
+          searchSymbol.trim() &&
+          !sym.toLowerCase().includes(searchSymbol.trim().toLowerCase())
+        ) {
+          return false;
+        }
+        return true;
+      });
+  }, [walls, minWallUsd, searchSymbol]);
 
   const totalBidLiquidityUsd = useMemo(
     () => filteredWalls.reduce((acc, w) => acc + (w.usd_value || 0), 0),
@@ -51,10 +77,10 @@ export default function LiveWallsPage() {
     }
     return (
       filteredWalls[0] || {
-        symbol: "CT",
-        price: 0.14015,
-        mid_price: 0.14021,
-        usd_value: 41547,
+        symbol: "BTC",
+        price: 68000,
+        mid_price: 68200,
+        usd_value: 120000,
       }
     );
   }, [filteredWalls, selectedWallSymbol]);
@@ -71,7 +97,7 @@ export default function LiveWallsPage() {
             </div>
             <div>
               <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Total Tracked Bid Depth
+                Tracked Depth (&ge;${minWallUsd.toLocaleString()})
               </span>
               <span className="text-[10px] text-slate-500">
                 Alpha • KuCoin • Bitget • MEXC • OKX
@@ -79,7 +105,10 @@ export default function LiveWallsPage() {
             </div>
           </div>
           <p className="font-mono text-lg font-black text-emerald-400 sm:text-xl">
-            ${totalBidLiquidityUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+            $
+            {totalBidLiquidityUsd.toLocaleString("en-US", {
+              maximumFractionDigits: 0,
+            })}
           </p>
         </div>
 
@@ -115,7 +144,7 @@ export default function LiveWallsPage() {
               <Shield className="h-4 w-4" />
             </div>
             <span className="hidden text-[10px] font-bold uppercase tracking-wider text-slate-400 xl:block">
-              Filter
+              Min ${minWallUsd.toLocaleString()}
             </span>
           </div>
 
@@ -166,9 +195,11 @@ export default function LiveWallsPage() {
               <span>How to Trade Bid Wall Setups</span>
             </div>
             <p className="mt-1 leading-relaxed text-slate-400">
-              Click any wall card on the left to inspect its cumulative Bid vs. Ask imbalance curve above. Look for tokens with{" "}
-              <strong className="text-emerald-300">&gt;70% Respect Rate</strong> and{" "}
-              <strong className="text-cyan-300">&gt;1.8x Bid/Ask Ratio</strong> (Ask Vacuum) for low-risk spot scalps.
+              Click any wall card on the left to inspect its cumulative Bid vs.
+              Ask imbalance curve above. Look for tokens with{" "}
+              <strong className="text-emerald-300">&gt;70% Respect Rate</strong>{" "}
+              and <strong className="text-cyan-300">&gt;1.8x Bid/Ask Ratio</strong>{" "}
+              (Ask Vacuum) for low-risk spot scalps.
             </p>
           </div>
         </div>

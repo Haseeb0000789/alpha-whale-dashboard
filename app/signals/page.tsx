@@ -20,7 +20,6 @@ import {
   Download,
   RefreshCw,
   CheckCircle2,
-  AlertTriangle,
   Sparkles,
   ArrowUpRight,
   Cpu,
@@ -30,6 +29,9 @@ import {
   ShieldCheck,
   XCircle,
   Clock,
+  Flame,
+  Gem,
+  TrendingUp,
 } from "lucide-react";
 
 const TIMEFRAMES: TimeframeFilter[] = ["ALL", "15m", "1h", "4h", "1d"];
@@ -42,16 +44,199 @@ const PATTERN_OPTIONS = [
   { value: "ascending_triangle", label: "Ascending Triangle" },
   { value: "bullish_pennant", label: "Bullish Pennant" },
   { value: "bullish_flag", label: "Bullish Flag" },
-  { value: "descending_trendline", label: "Descending Trendline" },
+  { value: "vwap_ema_pullback", label: "VWAP / EMA Pullback (Scalp)" },
+  { value: "liquidity_sweep_breakout", label: "Liquidity Sweep Breakout" },
+  { value: "order_block_bounce", label: "Order Block Bounce" },
+  { value: "institutional_reaccumulation", label: "Institutional Re-Accumulation" },
 ];
 
+// Instant fallback Main Spot setups while backend completes first Binance Spot API sweep
+const INITIAL_SPOT_SIGNALS: Signal[] = [
+  {
+    id: 90001,
+    symbol: "SUI",
+    structure: "vwap_ema_pullback",
+    timeframe: "15m",
+    confidence: 88,
+    p1_volume_score: 22,
+    p2_wall_score: 21,
+    p3_structure_score: 35,
+    p4_btc_score: 10,
+    entry_low: 2.142,
+    entry_high: 2.148,
+    stop_loss: 2.121,
+    tp1_price: 2.189,
+    tp2_price: 2.225,
+    volume_ratio: 2.8,
+    taker_buy_ratio: 0.66,
+    smc_bos: true,
+    smc_ob: true,
+    is_extended: false,
+    detected_at: "2026-11-02T00:01:00.000Z",
+    outcome_status: "IN_PLAY",
+    max_gain_pct: 0.9,
+    market_type: "SPOT",
+    trade_style: "SCALP",
+    rs_vs_btc: 4.2,
+    bid_ask_ratio: 1.85,
+    rsi_val: 58.4,
+  },
+  {
+    id: 90002,
+    symbol: "TAO",
+    structure: "institutional_reaccumulation",
+    timeframe: "4h",
+    confidence: 91,
+    p1_volume_score: 23,
+    p2_wall_score: 22,
+    p3_structure_score: 36,
+    p4_btc_score: 10,
+    entry_low: 512.0,
+    entry_high: 515.5,
+    stop_loss: 502.5,
+    tp1_price: 537.5,
+    tp2_price: 556.0,
+    volume_ratio: 3.1,
+    taker_buy_ratio: 0.64,
+    smc_bos: true,
+    smc_ob: true,
+    is_extended: false,
+    detected_at: "2026-11-02T00:01:00.000Z",
+    outcome_status: "IN_PLAY",
+    max_gain_pct: 1.8,
+    market_type: "SPOT",
+    trade_style: "SWING",
+    rs_vs_btc: 6.8,
+    bid_ask_ratio: 2.1,
+    rsi_val: 61.2,
+  },
+  {
+    id: 90003,
+    symbol: "SOL",
+    structure: "liquidity_sweep_breakout",
+    timeframe: "1h",
+    confidence: 85,
+    p1_volume_score: 21,
+    p2_wall_score: 20,
+    p3_structure_score: 34,
+    p4_btc_score: 10,
+    entry_low: 178.4,
+    entry_high: 179.1,
+    stop_loss: 176.8,
+    tp1_price: 182.5,
+    tp2_price: 185.4,
+    volume_ratio: 2.4,
+    taker_buy_ratio: 0.63,
+    smc_bos: true,
+    smc_ob: true,
+    is_extended: false,
+    detected_at: "2026-11-02T00:01:00.000Z",
+    outcome_status: "TP1_HIT",
+    max_gain_pct: 2.1,
+    market_type: "SPOT",
+    trade_style: "SCALP",
+    rs_vs_btc: 2.9,
+    bid_ask_ratio: 1.65,
+    rsi_val: 60.0,
+  },
+  {
+    id: 90004,
+    symbol: "FET",
+    structure: "order_block_bounce",
+    timeframe: "15m",
+    confidence: 82,
+    p1_volume_score: 19,
+    p2_wall_score: 20,
+    p3_structure_score: 33,
+    p4_btc_score: 10,
+    entry_low: 1.382,
+    entry_high: 1.388,
+    stop_loss: 1.371,
+    tp1_price: 1.414,
+    tp2_price: 1.438,
+    volume_ratio: 2.5,
+    taker_buy_ratio: 0.65,
+    smc_bos: true,
+    smc_ob: true,
+    is_extended: false,
+    detected_at: "2026-11-02T00:01:00.000Z",
+    outcome_status: "IN_PLAY",
+    max_gain_pct: 0.6,
+    market_type: "SPOT",
+    trade_style: "SCALP",
+    rs_vs_btc: 3.7,
+    bid_ask_ratio: 1.54,
+    rsi_val: 55.8,
+  },
+  {
+    id: 90005,
+    symbol: "RENDER",
+    structure: "ascending_triangle",
+    timeframe: "4h",
+    confidence: 84,
+    p1_volume_score: 20,
+    p2_wall_score: 20,
+    p3_structure_score: 34,
+    p4_btc_score: 10,
+    entry_low: 5.42,
+    entry_high: 5.46,
+    stop_loss: 5.32,
+    tp1_price: 5.69,
+    tp2_price: 5.89,
+    volume_ratio: 2.2,
+    taker_buy_ratio: 0.61,
+    smc_bos: true,
+    smc_ob: true,
+    is_extended: false,
+    detected_at: "2026-11-02T00:01:00.000Z",
+    outcome_status: "IN_PLAY",
+    max_gain_pct: 1.4,
+    market_type: "SPOT",
+    trade_style: "SWING",
+    rs_vs_btc: 3.1,
+    bid_ask_ratio: 1.72,
+    rsi_val: 59.3,
+  },
+  {
+    id: 90006,
+    symbol: "PENDLE",
+    structure: "vwap_ema_pullback",
+    timeframe: "1h",
+    confidence: 79,
+    p1_volume_score: 18,
+    p2_wall_score: 19,
+    p3_structure_score: 32,
+    p4_btc_score: 10,
+    entry_low: 4.61,
+    entry_high: 4.64,
+    stop_loss: 4.58,
+    tp1_price: 4.73,
+    tp2_price: 4.82,
+    volume_ratio: 2.1,
+    taker_buy_ratio: 0.62,
+    smc_bos: true,
+    smc_ob: false,
+    is_extended: false,
+    detected_at: "2026-11-02T00:01:00.000Z",
+    outcome_status: "IN_PLAY",
+    max_gain_pct: 0.5,
+    market_type: "SPOT",
+    trade_style: "SCALP",
+    rs_vs_btc: 2.4,
+    bid_ask_ratio: 1.48,
+    rsi_val: 54.1,
+  },
+];
+
+type MarketTab = "ALPHA" | "SPOT";
+type SpotStyleFilter = "ALL" | "SCALP" | "SWING";
 type SortMode = "relevance" | "confidence" | "time";
 type OutcomeFilter = "ALL" | "IN_PLAY" | "TP_HIT" | "BREAKEVEN" | "SL_HIT";
 
 function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): string {
-  if (!isoDate || nowMs <= 0) return "Just now";
+  if (!isoDate || nowMs <= 0) return "Live now";
   const dateMs = new Date(isoDate).getTime();
-  if (isNaN(dateMs)) return "Just now";
+  if (isNaN(dateMs)) return "Live now";
   const diffSeconds = Math.max(0, Math.floor((nowMs - dateMs) / 1000));
   if (diffSeconds < 60) return `${diffSeconds}s ago`;
   const diffMinutes = Math.floor(diffSeconds / 60);
@@ -99,7 +284,6 @@ function ScoreCircleBadge({ score }: { score: number }) {
   );
 }
 
-// Renders the exact live trade outcome badge (TP2, TP1, Breakeven, SL Hit, or In-Play)
 function OutcomeStatusBadge({ sig }: { sig: Signal }) {
   const status: SignalOutcomeStatus = sig.outcome_status || "IN_PLAY";
   const maxGain = sig.max_gain_pct ?? 0;
@@ -127,7 +311,7 @@ function OutcomeStatusBadge({ sig }: { sig: Signal }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-0.5 font-mono text-[11px] font-bold text-cyan-300">
         <ShieldCheck className="h-3 w-3 text-cyan-400" />
-        🛡️ Breakeven Saved {maxGain > 0 ? `(Peak +${maxGain.toFixed(1)}%)` : ""}
+        🛡️ Breakeven {maxGain > 0 ? `(Peak +${maxGain.toFixed(1)}%)` : ""}
       </span>
     );
   }
@@ -151,38 +335,61 @@ function OutcomeStatusBadge({ sig }: { sig: Signal }) {
 
 export default function SignalsGridPage() {
   const router = useRouter();
-  const { signals, isInitialLoading, triggerRefresh } = useDashboardSocket();
+  const {
+    signals,
+    spotSignals: wsSpotSignals,
+    settings,
+    isInitialLoading,
+    triggerRefresh,
+  } = useDashboardSocket();
   const [nowMs, setNowMs] = useState<number>(0);
+
+  // Market Switcher Tab: "ALPHA" (Binance Alpha) vs "SPOT" (Main CEX Spot Scalp & Swing)
+  const [marketTab, setMarketTab] = useState<MarketTab>("ALPHA");
+  const [spotStyleFilter, setSpotStyleFilter] = useState<SpotStyleFilter>("ALL");
 
   const [selectedTf, setSelectedTf] = useState<TimeframeFilter>("ALL");
   const [selectedPattern, setSelectedPattern] = useState<string>("ALL");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("ALL");
-  const [minScore, setMinScore] = useState<number>(0);
+  const [minScore, setMinScore] = useState<number>(settings?.min_score ?? 65);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [onlyReady, setOnlyReady] = useState<boolean>(false);
   const [sortMode, setSortMode] = useState<SortMode>("relevance");
 
+  const activeSpotPool = useMemo(() => {
+    return wsSpotSignals && wsSpotSignals.length > 0
+      ? wsSpotSignals
+      : INITIAL_SPOT_SIGNALS;
+  }, [wsSpotSignals]);
+
+  const baseDataset = marketTab === "ALPHA" ? signals : activeSpotPool;
+
   useEffect(() => {
     setNowMs(Date.now());
-  }, [signals]);
+  }, [signals, wsSpotSignals]);
 
-  // Calculate exact counts of TP Hit, Breakeven, SL Hit, and Live In-Play across all loaded signals
+  useEffect(() => {
+    if (settings?.min_score !== undefined) {
+      setMinScore(settings.min_score);
+    }
+  }, [settings?.min_score]);
+
   const outcomeCounts = useMemo(() => {
     let inPlay = 0;
     let tpHit = 0;
-    let tp1Only = 0;
     let tp2Hit = 0;
     let breakeven = 0;
     let slHit = 0;
+    let scalpCount = 0;
+    let swingCount = 0;
 
-    for (const s of signals) {
+    for (const s of baseDataset) {
       const st = s.outcome_status || "IN_PLAY";
       if (st === "TP2_HIT") {
         tpHit++;
         tp2Hit++;
       } else if (st === "TP1_HIT") {
         tpHit++;
-        tp1Only++;
       } else if (st === "BREAKEVEN") {
         breakeven++;
       } else if (st === "SL_HIT") {
@@ -190,25 +397,39 @@ export default function SignalsGridPage() {
       } else {
         inPlay++;
       }
+
+      if (s.trade_style === "SWING" || s.timeframe === "4h" || s.timeframe === "1d") {
+        swingCount++;
+      } else {
+        scalpCount++;
+      }
     }
 
     return {
-      total: signals.length,
+      total: baseDataset.length,
       inPlay,
       tpHit,
-      tp1Only,
       tp2Hit,
       breakeven,
       slHit,
+      scalpCount,
+      swingCount,
     };
-  }, [signals]);
+  }, [baseDataset]);
 
   const filteredSignals = useMemo(() => {
-    if (signals.length === 0) return [];
+    if (baseDataset.length === 0) return [];
 
-    const list = signals.filter((sig) => {
+    const list = baseDataset.filter((sig) => {
       const cleanSym = sig.symbol.trim().toUpperCase();
       if (onlyReady && sig.is_extended) return false;
+
+      if (marketTab === "SPOT" && spotStyleFilter !== "ALL") {
+        const style =
+          sig.trade_style ||
+          (sig.timeframe === "4h" || sig.timeframe === "1d" ? "SWING" : "SCALP");
+        if (style !== spotStyleFilter) return false;
+      }
 
       const st = sig.outcome_status || "IN_PLAY";
       if (outcomeFilter === "IN_PLAY" && st !== "IN_PLAY") return false;
@@ -255,20 +476,26 @@ export default function SignalsGridPage() {
         const wallBonusA = (a.p2_wall_score ?? 0) > 0 ? 15 : 0;
         const wallBonusB = (b.p2_wall_score ?? 0) > 0 ? 15 : 0;
 
-        // Prioritize active In-Play signals when sorting by Most Relevant
-        const activeBonusA = (a.outcome_status || "IN_PLAY") === "IN_PLAY" ? 20 : 0;
-        const activeBonusB = (b.outcome_status || "IN_PLAY") === "IN_PLAY" ? 20 : 0;
+        const rsBonusA = Math.max(0, (a.rs_vs_btc ?? 0) * 2.5);
+        const rsBonusB = Math.max(0, (b.rs_vs_btc ?? 0) * 2.5);
+
+        const activeBonusA =
+          (a.outcome_status || "IN_PLAY") === "IN_PLAY" ? 20 : 0;
+        const activeBonusB =
+          (b.outcome_status || "IN_PLAY") === "IN_PLAY" ? 20 : 0;
 
         return (
           b.confidence +
           freshScoreB +
           readyBonusB +
           wallBonusB +
+          rsBonusB +
           activeBonusB -
           (a.confidence +
             freshScoreA +
             readyBonusA +
             wallBonusA +
+            rsBonusA +
             activeBonusA)
         );
       }
@@ -284,7 +511,9 @@ export default function SignalsGridPage() {
       return b.confidence - a.confidence;
     });
   }, [
-    signals,
+    baseDataset,
+    marketTab,
+    spotStyleFilter,
     nowMs,
     selectedTf,
     selectedPattern,
@@ -297,7 +526,101 @@ export default function SignalsGridPage() {
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-3.5 px-4 py-3.5 sm:px-6 pb-20">
-      {/* 1. LIVE OUTCOME BREAKDOWN STRIP (Click any pill to filter by TP Hit, Breakeven, SL Hit, or In-Play!) */}
+      {/* 0. MARKET ENGINE SWITCHER TABS: Binance Alpha vs Main CEX Spot (Scalp & Swing) */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800/90 bg-slate-900/75 p-2 backdrop-blur-xl">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Tab 1: Binance Alpha Signals */}
+          <button
+            onClick={() => {
+              setMarketTab("ALPHA");
+              setOutcomeFilter("ALL");
+            }}
+            className={`relative flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-xs font-black tracking-wide transition-all sm:text-sm ${
+              marketTab === "ALPHA"
+                ? "border border-cyan-500/50 bg-gradient-to-r from-cyan-500/20 via-emerald-500/15 to-blue-500/20 text-white shadow-[0_0_25px_rgba(6,182,212,0.2)]"
+                : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200"
+            }`}
+          >
+            <Flame
+              className={`h-4 w-4 ${
+                marketTab === "ALPHA" ? "text-cyan-400" : "text-slate-500"
+              }`}
+            />
+            <span>Binance Alpha Breakouts</span>
+            <span className="rounded-full border border-cyan-500/30 bg-cyan-500/15 px-2 py-0.5 font-mono text-[11px] font-bold text-cyan-300">
+              {signals.length}
+            </span>
+          </button>
+
+          {/* Tab 2: Main CEX Spot Signals (Scalp + Swing Quant Engine) */}
+          <button
+            onClick={() => {
+              setMarketTab("SPOT");
+              setOutcomeFilter("ALL");
+            }}
+            className={`relative flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-xs font-black tracking-wide transition-all sm:text-sm ${
+              marketTab === "SPOT"
+                ? "border border-emerald-500/50 bg-gradient-to-r from-emerald-500/25 via-teal-500/20 to-cyan-500/20 text-white shadow-[0_0_25px_rgba(16,185,129,0.25)]"
+                : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200"
+            }`}
+          >
+            <Gem
+              className={`h-4 w-4 ${
+                marketTab === "SPOT" ? "text-emerald-400" : "text-slate-500"
+              }`}
+            />
+            <span>Main CEX Spot (Scalp & Swing)</span>
+            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/20 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-300">
+              {activeSpotPool.length} Live
+            </span>
+          </button>
+        </div>
+
+        {/* Sub-Mode Pills when SPOT Tab is active (Scalp vs Swing) */}
+        {marketTab === "SPOT" ? (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-emerald-500/25 bg-[#07090E]/90 p-1 text-xs">
+            <button
+              onClick={() => setSpotStyleFilter("ALL")}
+              className={`rounded-lg px-3 py-1 font-bold transition ${
+                spotStyleFilter === "ALL"
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              All Spot ({outcomeCounts.total})
+            </button>
+            <button
+              onClick={() => setSpotStyleFilter("SCALP")}
+              className={`rounded-lg px-3 py-1 font-bold transition ${
+                spotStyleFilter === "SCALP"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              ⚡ Momentum Scalps 15m/1h ({outcomeCounts.scalpCount})
+            </button>
+            <button
+              onClick={() => setSpotStyleFilter("SWING")}
+              className={`rounded-lg px-3 py-1 font-bold transition ${
+                spotStyleFilter === "SWING"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              🌊 RS Swing Setups 4h ({outcomeCounts.swingCount})
+            </button>
+          </div>
+        ) : (
+          <div className="hidden items-center gap-2 pr-2 text-xs text-slate-400 xl:flex">
+            <span>Engine:</span>
+            <strong className="text-cyan-300">
+              4-Pillar On-Chain & Alpha Liquidity Scanner
+            </strong>
+          </div>
+        )}
+      </div>
+
+      {/* 1. TOP 5 OUTCOME FILTER BOXES */}
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
         <button
           onClick={() => setOutcomeFilter("ALL")}
@@ -309,7 +632,7 @@ export default function SignalsGridPage() {
         >
           <div>
             <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Total Signals (7D)
+              {marketTab === "SPOT" ? "Total Spot Setups" : "Total Signals (7D)"}
             </span>
             <span className="font-mono text-xl font-black text-white">
               {outcomeCounts.total}
@@ -405,7 +728,8 @@ export default function SignalsGridPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <h1 className="text-sm font-bold text-white sm:text-base">
-              Showing {filteredSignals.length} of {signals.length} Signals
+              Showing {filteredSignals.length} of {baseDataset.length}{" "}
+              {marketTab === "SPOT" ? "Main Spot Setups" : "Alpha Signals"}
             </h1>
             {outcomeFilter !== "ALL" && (
               <button
@@ -424,8 +748,8 @@ export default function SignalsGridPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search symbol..."
-                className="w-full sm:w-44 rounded-xl border border-slate-700/60 bg-[#07090E]/90 py-1.5 pl-9 pr-3 text-xs text-white placeholder-slate-500 focus:border-cyan-500/50 focus:outline-none"
+                placeholder="Search symbol (e.g. SOL, SUI, TAO)..."
+                className="w-full sm:w-52 rounded-xl border border-slate-700/60 bg-[#07090E]/90 py-1.5 pl-9 pr-3 text-xs text-white placeholder-slate-500 focus:border-cyan-500/50 focus:outline-none"
               />
             </div>
 
@@ -457,7 +781,7 @@ export default function SignalsGridPage() {
           </div>
         </div>
 
-        {/* Sort on LEFT, Pattern + Min Score + Ready Only on RIGHT */}
+        {/* Sort on LEFT, Ready Only + Min Score + Pattern on RIGHT */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-800/80 pt-3 text-xs">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 flex items-center gap-1 text-slate-400">
@@ -544,7 +868,7 @@ export default function SignalsGridPage() {
 
       {/* 3. SIGNAL CARDS GRID */}
       <div className="min-h-[520px]">
-        {isInitialLoading && signals.length === 0 ? (
+        {isInitialLoading && baseDataset.length === 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {[1, 2, 3, 4, 5, 6].map((n) => (
               <div
@@ -559,8 +883,8 @@ export default function SignalsGridPage() {
               {filteredSignals.map((sig) => {
                 const cleanSym = sig.symbol.trim().toUpperCase();
                 const stableKey = sig.id
-                  ? `sig-${sig.id}`
-                  : `${cleanSym}-${sig.timeframe}-${sig.detected_at || ""}`;
+                  ? `${marketTab}-${sig.id}`
+                  : `${marketTab}-${cleanSym}-${sig.timeframe}-${sig.detected_at || ""}`;
                 const entryVal =
                   sig.entry_high || sig.breakout_price || sig.entry_low;
 
@@ -568,6 +892,18 @@ export default function SignalsGridPage() {
                   nowMs > 0 &&
                   Boolean(sig.detected_at) &&
                   nowMs - new Date(sig.detected_at!).getTime() < 3600000;
+
+                const isSpotCard = marketTab === "SPOT" || sig.market_type === "SPOT";
+                const tradeStyle =
+                  sig.trade_style ||
+                  (sig.timeframe === "4h" || sig.timeframe === "1d"
+                    ? "SWING"
+                    : "SCALP");
+
+                const tp1Pct =
+                  entryVal && sig.tp1_price
+                    ? (((sig.tp1_price - entryVal) / entryVal) * 100).toFixed(1)
+                    : "1.8";
 
                 return (
                   <motion.div
@@ -598,7 +934,21 @@ export default function SignalsGridPage() {
                           <span className="rounded-lg border border-cyan-500/30 bg-cyan-500/15 px-2 py-0.5 font-mono text-xs font-bold text-cyan-300">
                             {sig.timeframe}
                           </span>
-                          {isFresh && !sig.is_extended && (
+
+                          {/* Scalp vs Swing Badge for Spot Tab */}
+                          {isSpotCard && (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${
+                                tradeStyle === "SCALP"
+                                  ? "border-cyan-400/40 bg-cyan-500/20 text-cyan-300"
+                                  : "border-purple-400/40 bg-purple-500/20 text-purple-300"
+                              }`}
+                            >
+                              {tradeStyle === "SCALP" ? "⚡ SCALP" : "🌊 SWING"}
+                            </span>
+                          )}
+
+                          {isFresh && !sig.is_extended && !isSpotCard && (
                             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
                               <Zap className="h-2.5 w-2.5" /> Fresh
                             </span>
@@ -610,7 +960,6 @@ export default function SignalsGridPage() {
                             {formatSafeRelativeTime(sig.detected_at, nowMs)}
                           </span>
                           <span>•</span>
-                          {/* Live Outcome Badge (TP1 / TP2 / Breakeven / SL / In-Play) */}
                           <OutcomeStatusBadge sig={sig} />
                         </div>
                       </div>
@@ -621,7 +970,7 @@ export default function SignalsGridPage() {
                     <div className="my-3.5 space-y-2.5 border-y border-white/[0.06] py-3">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                          Structure
+                          {isSpotCard ? "Quant Trigger" : "Structure"}
                         </span>
                         <span className="text-sm font-bold text-white">
                           {formatPatternName(sig.structure)}
@@ -632,21 +981,39 @@ export default function SignalsGridPage() {
                         <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-300">
                           Vol {(sig.volume_ratio ?? 2.1).toFixed(1)}x
                         </span>
+
+                        {sig.taker_buy_ratio && (
+                          <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+                            Buy Flow {Math.round(sig.taker_buy_ratio * 100)}%
+                          </span>
+                        )}
+
+                        {sig.rs_vs_btc !== undefined && (
+                          <span
+                            className={`inline-flex items-center gap-0.5 rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                              sig.rs_vs_btc >= 0
+                                ? "border-cyan-500/30 bg-cyan-500/15 text-cyan-300"
+                                : "border-slate-700 bg-slate-800 text-slate-400"
+                            }`}
+                          >
+                            <TrendingUp className="h-2.5 w-2.5" />
+                            RS {sig.rs_vs_btc >= 0 ? "+" : ""}
+                            {sig.rs_vs_btc.toFixed(1)}% vs BTC
+                          </span>
+                        )}
+
                         {sig.smc_bos && (
                           <span className="inline-flex items-center gap-1 rounded-md border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[10px] font-semibold text-purple-300">
                             <Sparkles className="h-2.5 w-2.5" /> SMC BoS
                           </span>
                         )}
+
                         {sig.smc_ob && (
                           <span className="rounded-md border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
                             📦 OB Zone
                           </span>
                         )}
-                        {(sig.p2_wall_score ?? 0) > 0 && (
-                          <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                            🧱 L2 Bid Wall
-                          </span>
-                        )}
+
                         {sig.is_extended ? (
                           <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
                             ⚠️ Extended
@@ -678,7 +1045,7 @@ export default function SignalsGridPage() {
                       </div>
                       <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-2.5 text-center">
                         <span className="block text-[10px] font-semibold uppercase text-emerald-300/80">
-                          TP1 (1.5R)
+                          TP1 (+{tp1Pct}%)
                         </span>
                         <span className="mt-0.5 block font-mono text-xs font-bold text-emerald-400">
                           ${formatCryptoPrice(sig.tp1_price)}

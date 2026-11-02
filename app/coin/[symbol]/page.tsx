@@ -78,7 +78,15 @@ function CoinDetailContent() {
   const symbol = decodeURIComponent(rawSymbol).trim().toUpperCase();
 
   // 1. Grab already-loaded WebSocket data in 0ms!
-  const { signals: wsSignals, walls: wsWalls } = useDashboardSocket();
+  const {
+    signals: wsAlphaSignals,
+    spotSignals: wsSpotSignals,
+    walls: wsWalls,
+  } = useDashboardSocket();
+  const wsSignals = useMemo(
+    () => [...wsAlphaSignals, ...(wsSpotSignals || [])],
+    [wsAlphaSignals, wsSpotSignals]
+  );
 
   const [apiCoinData, setApiCoinData] = useState<CoinDetailData | null>(null);
   const [activeTab, setActiveTab] = useState<"signals" | "walls">("signals");

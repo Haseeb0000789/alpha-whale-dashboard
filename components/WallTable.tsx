@@ -25,6 +25,15 @@ interface WallTableProps {
 
 type SortKey = "relevance" | "usd_value" | "proximity" | "respect_rate";
 
+// ---------------------------------------------------------------------------
+// FIX #1: moved ABOVE the component so useMemo sort can use it safely
+// Handles mixed backends: 0.75 (fraction) → 75 (percent), 75 → 75
+// ---------------------------------------------------------------------------
+function normalizeRespectPct(raw?: number): number {
+  if (raw === undefined || raw === null) return 75;
+  return raw <= 1 ? Math.round(raw * 100) : Math.round(raw);
+}
+
 function formatSafeRelativeTime(isoDate: string | undefined, nowMs: number): string {
   if (!isoDate || nowMs <= 0) return "0s ago";
   const dateMs = new Date(isoDate).getTime();
@@ -67,29 +76,36 @@ export default function WallTable({
 
     const list = Array.from(map.values());
     return list.sort((a, b) => {
+      // 1. Relevance — highest score first, then tightest distance
       if (sortKey === "relevance") {
         const relA = a.relevance_score ?? a.entry_score ?? 50;
         const relB = b.relevance_score ?? b.entry_score ?? 50;
         if (relB !== relA) return relB - relA;
         return (a.distance_pct ?? 1) - (b.distance_pct ?? 1);
       }
+
+      // 2. Proximity — closest wall to mid-price first
       if (sortKey === "proximity") {
         return (a.distance_pct ?? 99) - (b.distance_pct ?? 99);
       }
+
+      // 3. Size — biggest USD wall first
       if (sortKey === "usd_value") {
         return b.usd_value - a.usd_value;
       }
-      return (b.respect_rate ?? 0.75) - (a.respect_rate ?? 0.75);
+
+      // 4. FIX #2: Respect % — highest respected first (100% → 80% → ... → 0%)
+      //    Tie-breaker: larger USD wall wins
+      const respDiff =
+        normalizeRespectPct(b.respect_rate) -
+        normalizeRespectPct(a.respect_rate);
+      if (respDiff !== 0) return respDiff;
+      return b.usd_value - a.usd_value;
     });
   }, [walls, sortKey]);
 
   const formatExchange = (ex: string) =>
     (ex || "binance_alpha").replace("_", " ").toUpperCase();
-
-  const normalizeRespectPct = (raw?: number) => {
-    if (raw === undefined || raw === null) return 75;
-    return raw <= 1 ? Math.round(raw * 100) : Math.round(raw);
-  };
 
   return (
     <div className="flex flex-col rounded-2xl border border-slate-800/90 bg-slate-900/60 shadow-2xl backdrop-blur-xl">

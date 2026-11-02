@@ -34,8 +34,7 @@ export interface Signal {
   wall_price?: number | null;
   wall_usd?: number | null;
   wall_respect_rate?: number | null;
-  
-  // Live Outcome Tracking Fields
+  // Outcome Tracking Fields
   outcome_status?: SignalOutcomeStatus;
   outcome_finalized?: boolean;
   hit_tp1?: boolean;
@@ -44,6 +43,12 @@ export interface Signal {
   hit_sl?: boolean;
   max_gain_pct?: number;
   max_drawdown_pct?: number;
+  // New Main CEX Spot Quant Fields
+  market_type?: "ALPHA" | "SPOT";
+  trade_style?: "SCALP" | "SWING";
+  rs_vs_btc?: number;
+  bid_ask_ratio?: number;
+  rsi_val?: number;
 }
 
 export interface ExchangeWallItem {
