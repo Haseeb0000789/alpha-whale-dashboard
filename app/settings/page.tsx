@@ -27,6 +27,9 @@ import {
   Filter,
   Clock,
   Layers,
+  Database,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 
 const SPOT_QUANT_PATTERNS = new Set([
@@ -37,7 +40,7 @@ const SPOT_QUANT_PATTERNS = new Set([
 ]);
 
 export default function ControlCenterPage() {
-  const { settings, saveBotSettings } = useDashboardSocket();
+  const { settings, saveBotSettings, resetTelemetryData } = useDashboardSocket();
 
   // Local form draft overlaid on global WebSocket/localStorage settings
   const [draft, setDraft] = useState<Partial<BotSettings> | null>(null);
@@ -55,6 +58,10 @@ export default function ControlCenterPage() {
   }, [settings, draft]);
 
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [confirmWipe, setConfirmWipe] = useState<boolean>(false);
+  const [isWiping, setIsWiping] = useState<boolean>(false);
+  const [wipeBanner, setWipeBanner] = useState<string | null>(null);
+  const confirmWipeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [toast, setToast] = useState<{
     message: string;
     variant: "synced" | "local";
@@ -77,8 +84,50 @@ export default function ControlCenterPage() {
       if (toastTimerRef.current) {
         clearTimeout(toastTimerRef.current);
       }
+      if (confirmWipeTimerRef.current) {
+        clearTimeout(confirmWipeTimerRef.current);
+      }
     };
   }, []);
+
+  const handleResetTelemetryClick = async () => {
+    if (isWiping) return;
+
+    if (!confirmWipe) {
+      setConfirmWipe(true);
+      setWipeBanner(null);
+      if (confirmWipeTimerRef.current) {
+        clearTimeout(confirmWipeTimerRef.current);
+      }
+      confirmWipeTimerRef.current = setTimeout(() => {
+        setConfirmWipe(false);
+        confirmWipeTimerRef.current = null;
+      }, 5000);
+      return;
+    }
+
+    if (confirmWipeTimerRef.current) {
+      clearTimeout(confirmWipeTimerRef.current);
+      confirmWipeTimerRef.current = null;
+    }
+    setConfirmWipe(false);
+    setIsWiping(true);
+
+    const ok = await resetTelemetryData();
+    setIsWiping(false);
+
+    if (ok) {
+      const successMsg =
+        "✅ Database & Spot Registry wiped! Tracking fresh signals from 0.";
+      setWipeBanner(successMsg);
+      showToast(successMsg, "synced");
+    } else {
+      showToast(
+        "⚠️ Failed to wipe telemetry — check backend connection.",
+        "local"
+      );
+    }
+  };
 
   const updateField = <K extends keyof BotSettings>(
     key: K,
@@ -608,6 +657,54 @@ export default function ControlCenterPage() {
                 />
               </div>
             </div>
+          </div>
+
+          {/* Telemetry & Database Reset */}
+          <div className="rounded-2xl border border-rose-500/30 bg-slate-900/60 p-5 backdrop-blur-xl space-y-3.5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <Database className="h-4 w-4 text-rose-400" />
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">
+                    Telemetry &amp; Database Reset
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Wipe historical Alpha signals, outcomes &amp; Spot state to evaluate new strategy filters from 0
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {wipeBanner && (
+              <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2.5 text-xs font-bold text-emerald-300">
+                {wipeBanner}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleResetTelemetryClick}
+              disabled={isWiping}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black transition disabled:opacity-60 ${
+                confirmWipe
+                  ? "border-amber-400/70 bg-amber-500/20 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.25)] hover:bg-amber-500/30"
+                  : "border-rose-500/40 bg-rose-500/15 text-rose-300 hover:border-rose-400/60 hover:bg-rose-500/25 hover:text-white"
+              }`}
+            >
+              {isWiping ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin text-rose-300" />
+                  <span>Wiping Database &amp; Spot Registry...</span>
+                </>
+              ) : confirmWipe ? (
+                <span>⚠️ Click Again to Confirm Full DB Wipe</span>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" />
+                  <span>Reset Telemetry &amp; Start Fresh</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
       </form>

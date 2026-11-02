@@ -157,6 +157,7 @@ interface DashboardSocketState {
   lastUpdated: string | null;
   triggerRefresh: () => void;
   saveBotSettings: (newSettings: BotSettings) => Promise<boolean>;
+  resetTelemetryData: () => Promise<boolean>;
 }
 
 const DashboardSocketContext = createContext<DashboardSocketState>({
@@ -170,6 +171,7 @@ const DashboardSocketContext = createContext<DashboardSocketState>({
   lastUpdated: null,
   triggerRefresh: () => {},
   saveBotSettings: async () => false,
+  resetTelemetryData: async () => false,
 });
 
 export const useDashboardSocket = () => useContext(DashboardSocketContext);
@@ -566,9 +568,24 @@ export function DashboardSocketProvider({
                 );
               }
               if (Array.isArray(payload.spot_signals)) {
-                setSpotSignals((prev) =>
-                  mergeSignalStream(prev, payload.spot_signals, activeCfg, true)
-                );
+                const isResetSnapshot =
+                  payload.spot_signals.length === 0 &&
+                  Array.isArray(payload.signals) &&
+                  payload.signals.length === 0 &&
+                  payload.stats?.total_signals === 0;
+                if (isResetSnapshot) {
+                  knownSpotKeysRef.current.clear();
+                  setSpotSignals([]);
+                } else {
+                  setSpotSignals((prev) =>
+                    mergeSignalStream(
+                      prev,
+                      payload.spot_signals,
+                      activeCfg,
+                      true
+                    )
+                  );
+                }
               }
               if (payload.stats) setStats(payload.stats);
               if (Array.isArray(payload.walls)) setWalls(payload.walls);
@@ -688,6 +705,47 @@ export function DashboardSocketProvider({
     []
   );
 
+  const resetTelemetryData = useCallback(async (): Promise<boolean> => {
+    const apiBase = resolveApiBase();
+    try {
+      const res = await fetch(`${apiBase}/api/settings/reset-telemetry`, {
+        method: "POST",
+      });
+      if (!res.ok) return false;
+
+      knownAlphaKeysRef.current.clear();
+      knownSpotKeysRef.current.clear();
+      lastSpotFallbackFetchRef.current = Date.now();
+      setSignals([]);
+      setSpotSignals([]);
+      setStats((prev) =>
+        prev
+          ? {
+              ...prev,
+              total_signals: 0,
+              finalized: 0,
+              win_rate_pct: 0,
+              tp1_rate_pct: 0,
+              tp2_rate_pct: 0,
+              breakeven_rate_pct: 0,
+              sl_rate_pct: 0,
+              wall_backed_win_rate_pct: 0,
+              avg_max_gain_pct: 0,
+              avg_max_drawdown_pct: 0,
+              by_structure: [],
+              by_timeframe: [],
+            }
+          : null
+      );
+
+      triggerRefresh();
+      await fetchInitialHttpSnapshot();
+      return true;
+    } catch {
+      return false;
+    }
+  }, [fetchInitialHttpSnapshot, triggerRefresh]);
+
   const contextValue = useMemo<DashboardSocketState>(
     () => ({
       signals,
@@ -700,6 +758,7 @@ export function DashboardSocketProvider({
       lastUpdated,
       triggerRefresh,
       saveBotSettings,
+      resetTelemetryData,
     }),
     [
       signals,
@@ -712,6 +771,7 @@ export function DashboardSocketProvider({
       lastUpdated,
       triggerRefresh,
       saveBotSettings,
+      resetTelemetryData,
     ]
   );
 
