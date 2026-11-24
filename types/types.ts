@@ -183,6 +183,7 @@ export interface BotSettings {
   proximity_pct: number;
   telegram_wall_alerts_enabled: boolean;
   telegram_min_wall_usd: number;
+  telegram_wall_cooldown_minutes: number;
   enable_dead_cat: boolean;
   enable_smc: boolean;
   enable_extension_penalty: boolean;
@@ -191,6 +192,7 @@ export interface BotSettings {
   max_alerts_per_cycle: number;
   enabled_timeframes: string[];
   enabled_patterns: string[];
+  blacklisted_symbols?: string[];
 }
 
 export function formatCryptoPrice(price: number | undefined | null): string {

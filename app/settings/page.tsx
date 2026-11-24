@@ -61,23 +61,48 @@ const SPOT_QUANT_PATTERNS = new Set([
 ]);
 
 function ControlCenterContent() {
-  const { settings, accessKey, saveBotSettings, resetTelemetryData } =
-    useDashboardSocket();
+  const {
+    settings,
+    accessKey,
+    saveBotSettings,
+    resetTelemetryData,
+    triggerRefresh,
+  } = useDashboardSocket();
 
   // Local form draft overlaid on global WebSocket/localStorage settings
   const [draft, setDraft] = useState<Partial<BotSettings> | null>(null);
+  const [localBlacklistOverride, setLocalBlacklistOverride] = useState<
+    string[] | null
+  >(null);
+  const [blacklistInput, setBlacklistInput] = useState<string>("");
+  const [isUpdatingBlacklist, setIsUpdatingBlacklist] =
+    useState<boolean>(false);
+
+  const blacklistedSymbols = useMemo(() => {
+    if (localBlacklistOverride !== null) {
+      return localBlacklistOverride;
+    }
+    return Array.isArray(settings.blacklisted_symbols)
+      ? settings.blacklisted_symbols
+      : [];
+  }, [localBlacklistOverride, settings.blacklisted_symbols]);
+
   const formData: BotSettings = useMemo(() => {
     const merged = draft ? { ...settings, ...draft } : settings;
     return {
       ...merged,
+      telegram_wall_cooldown_minutes: Number(
+        merged.telegram_wall_cooldown_minutes ?? 120
+      ),
       enabled_timeframes: Array.isArray(merged.enabled_timeframes)
         ? merged.enabled_timeframes
         : [...ALL_TIMEFRAMES],
       enabled_patterns: Array.isArray(merged.enabled_patterns)
         ? merged.enabled_patterns
         : [...ALL_PATTERNS],
+      blacklisted_symbols: blacklistedSymbols,
     };
-  }, [settings, draft]);
+  }, [settings, draft, blacklistedSymbols]);
 
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [confirmWipe, setConfirmWipe] = useState<boolean>(false);
@@ -230,6 +255,74 @@ function ControlCenterContent() {
     }
   };
 
+  const handleBlacklistAction = async (
+    rawSymbol: string,
+    action: "add" | "remove"
+  ) => {
+    const cleanSym = rawSymbol
+      .trim()
+      .toUpperCase()
+      .replace(/\/USDT$/i, "")
+      .replace(/\/USDC$/i, "")
+      .trim();
+    if (!cleanSym || isUpdatingBlacklist) return;
+
+    setIsUpdatingBlacklist(true);
+    const optimistic =
+      action === "add"
+        ? Array.from(new Set([...blacklistedSymbols, cleanSym])).sort()
+        : blacklistedSymbols.filter((s) => s !== cleanSym);
+    setLocalBlacklistOverride(optimistic);
+    if (action === "add") {
+      setBlacklistInput("");
+    }
+
+    const apiBase = resolveApiBase();
+    try {
+      const res = await fetch(`${apiBase}/api/dashboard/blacklist`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Key": accessKey,
+          "X-Access-Key": accessKey,
+        },
+        body: JSON.stringify({
+          symbol: cleanSym,
+          action,
+          reason:
+            action === "add"
+              ? "Blacklisted via Control Center UI"
+              : "Unblacklisted via Control Center UI",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.blacklisted_symbols)) {
+          setLocalBlacklistOverride(data.blacklisted_symbols);
+        }
+        triggerRefresh();
+        showToast(
+          action === "add"
+            ? `🚫 Added ${cleanSym} to Token Blacklist`
+            : `✅ Removed ${cleanSym} from Token Blacklist`,
+          "synced"
+        );
+      } else {
+        showToast(
+          `Failed to ${action} ${cleanSym} — check Admin session.`,
+          "local"
+        );
+      }
+    } catch {
+      showToast(
+        `Updated ${cleanSym} locally (Backend unreachable).`,
+        "local"
+      );
+    } finally {
+      setIsUpdatingBlacklist(false);
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) {
@@ -375,6 +468,7 @@ function ControlCenterContent() {
       proximity_pct: 1.5,
       telegram_wall_alerts_enabled: false,
       telegram_min_wall_usd: 15000,
+      telegram_wall_cooldown_minutes: 120,
       enable_dead_cat: true,
       enable_smc: true,
       enable_extension_penalty: true,
@@ -383,6 +477,7 @@ function ControlCenterContent() {
       max_alerts_per_cycle: 5,
       enabled_timeframes: [...DEFAULT_ENABLED_TIMEFRAMES],
       enabled_patterns: [...DEFAULT_ENABLED_PATTERNS],
+      blacklisted_symbols: blacklistedSymbols,
     };
     setDraft(null);
     const ok = await saveBotSettings(recommended);
@@ -857,7 +952,7 @@ function ControlCenterContent() {
               </h2>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-slate-800 bg-[#080B12]/90 p-3.5">
                 <label className="block text-[11px] font-bold text-slate-300">
                   Re-Alert Cooldown (Mins)
@@ -871,6 +966,25 @@ function ControlCenterContent() {
                     updateField("cooldown_minutes", Number(e.target.value))
                   }
                   className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-sm font-bold text-white focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-[#080B12]/90 p-3.5">
+                <label className="block text-[11px] font-bold text-slate-300">
+                  Wall Alert Cooldown (Mins)
+                </label>
+                <input
+                  type="number"
+                  min={5}
+                  max={720}
+                  value={formData.telegram_wall_cooldown_minutes ?? 120}
+                  onChange={(e) =>
+                    updateField(
+                      "telegram_wall_cooldown_minutes",
+                      Number(e.target.value)
+                    )
+                  }
+                  className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-sm font-bold text-amber-300 focus:border-amber-500 focus:outline-none"
                 />
               </div>
 
@@ -890,6 +1004,77 @@ function ControlCenterContent() {
                 />
               </div>
             </div>
+          </div>
+
+          {/* Token Blacklist Manager */}
+          <div className="rounded-2xl border border-slate-800/90 bg-slate-900/60 p-5 backdrop-blur-xl space-y-3.5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <Ban className="h-4 w-4 text-rose-400" />
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">
+                    🚫 Token Blacklist Manager
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Instantly block noisy or spoofed tokens across Alpha, Spot, Live Walls &amp; Telegram
+                  </p>
+                </div>
+              </div>
+              <span className="rounded-full border border-rose-500/30 bg-rose-500/15 px-2.5 py-0.5 font-mono text-[11px] font-bold text-rose-300">
+                {blacklistedSymbols.length} Blocked
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={blacklistInput}
+                onChange={(e) => setBlacklistInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleBlacklistAction(blacklistInput, "add");
+                  }
+                }}
+                placeholder="e.g. DGAI or PEPE"
+                className="flex-1 rounded-xl border border-slate-700 bg-[#080B12]/90 px-3.5 py-2 font-mono text-xs text-white placeholder-slate-500 focus:border-rose-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                disabled={isUpdatingBlacklist || !blacklistInput.trim()}
+                onClick={() => handleBlacklistAction(blacklistInput, "add")}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-500/20 px-3.5 py-2 text-xs font-extrabold text-rose-200 transition hover:bg-rose-500/30 disabled:opacity-50"
+              >
+                <Ban className="h-3.5 w-3.5 text-rose-400" />
+                <span>Add to Blacklist</span>
+              </button>
+            </div>
+
+            {blacklistedSymbols.length === 0 ? (
+              <div className="rounded-xl border border-slate-800/80 bg-[#080B12]/60 px-3.5 py-3 text-center text-xs text-slate-500">
+                No tokens are currently blacklisted. Add a symbol above to exclude it from all scans.
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {blacklistedSymbols.map((sym) => (
+                  <span
+                    key={sym}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/35 bg-rose-500/10 px-2.5 py-1 font-mono text-xs font-bold text-rose-200"
+                  >
+                    <span>{sym}</span>
+                    <button
+                      type="button"
+                      disabled={isUpdatingBlacklist}
+                      onClick={() => handleBlacklistAction(sym, "remove")}
+                      title={`Remove ${sym} from Blacklist`}
+                      className="ml-0.5 rounded px-1 text-rose-400 transition hover:bg-rose-500/25 hover:text-white disabled:opacity-50"
+                    >
+                      ✖
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* VIP Key Generator & Subscriptions */}

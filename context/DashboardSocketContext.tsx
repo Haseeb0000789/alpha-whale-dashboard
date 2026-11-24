@@ -59,6 +59,7 @@ export const DEFAULT_SETTINGS: BotSettings = {
   proximity_pct: 1.5,
   telegram_wall_alerts_enabled: false,
   telegram_min_wall_usd: 15000,
+  telegram_wall_cooldown_minutes: 120,
   enable_dead_cat: true,
   enable_smc: true,
   enable_extension_penalty: true,
@@ -67,6 +68,7 @@ export const DEFAULT_SETTINGS: BotSettings = {
   max_alerts_per_cycle: 5,
   enabled_timeframes: [...DEFAULT_ENABLED_TIMEFRAMES],
   enabled_patterns: [...DEFAULT_ENABLED_PATTERNS],
+  blacklisted_symbols: [],
 };
 
 function normalizeBotSettings(
@@ -103,16 +105,36 @@ function normalizeBotSettings(
     ),
     telegram_min_wall_usd:
       Number(merged.telegram_min_wall_usd ?? 15000) || 15000,
+    telegram_wall_cooldown_minutes: Math.max(
+      5,
+      Number(merged.telegram_wall_cooldown_minutes ?? 120) || 120
+    ),
     enabled_timeframes: Array.isArray(merged.enabled_timeframes)
       ? merged.enabled_timeframes.map((tf) => String(tf).trim().toLowerCase())
       : [...DEFAULT_ENABLED_TIMEFRAMES],
     enabled_patterns: Array.isArray(merged.enabled_patterns)
       ? merged.enabled_patterns.map((p) => String(p).trim().toLowerCase())
       : [...DEFAULT_ENABLED_PATTERNS],
+    blacklisted_symbols: Array.isArray(merged.blacklisted_symbols)
+      ? Array.from(
+          new Set(
+            merged.blacklisted_symbols
+              .map((s) => String(s).trim().toUpperCase())
+              .filter(Boolean)
+          )
+        ).sort()
+      : [],
   };
 }
 
 function isSignalStrategyEnabled(sig: Signal, cfg: BotSettings): boolean {
+  const sym = String(sig.symbol || "").trim().toUpperCase();
+  if (
+    Array.isArray(cfg.blacklisted_symbols) &&
+    cfg.blacklisted_symbols.includes(sym)
+  ) {
+    return false;
+  }
   const tf = String(sig.timeframe || "").trim().toLowerCase();
   const pat = String(sig.structure || "").trim().toLowerCase();
   const enabledTfs = Array.isArray(cfg.enabled_timeframes)
