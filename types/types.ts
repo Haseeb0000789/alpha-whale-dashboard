@@ -79,6 +79,8 @@ export interface BidWall {
   positives?: string[];
   warnings?: string[];
   exchange_walls?: ExchangeWallItem[];
+  first_detected_at?: string;
+  detected_at?: string;
   last_seen?: string;
   last_seen_at?: string;
 }
@@ -242,7 +244,11 @@ export function parseUtcTimestampMs(isoDate: string | undefined | null): number 
  */
 export function syncServerClock(
   serverIso?: string | null,
-  items?: Array<{ detected_at?: string; last_seen?: string }>
+  items?: Array<{
+    first_detected_at?: string;
+    detected_at?: string;
+    last_seen?: string;
+  }>
 ): void {
   const localNow = Date.now();
   if (serverIso) {
@@ -255,7 +261,9 @@ export function syncServerClock(
   if (Array.isArray(items) && items.length > 0) {
     let maxItemMs = 0;
     for (const item of items) {
-      const ts = parseUtcTimestampMs(item.detected_at || item.last_seen);
+      const ts = parseUtcTimestampMs(
+        item.first_detected_at || item.detected_at || item.last_seen
+      );
       if (!isNaN(ts) && ts > maxItemMs) {
         maxItemMs = ts;
       }

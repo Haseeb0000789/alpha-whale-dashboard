@@ -10,7 +10,7 @@ import {
   useDashboardSocket,
   resolveApiBase,
 } from "@/context/DashboardSocketContext";
-import { DepthPoint } from "@/types/types";
+import { DepthPoint, parseUtcTimestampMs } from "@/types/types";
 import {
   RefreshCw,
   Search,
@@ -163,6 +163,18 @@ function LiveWallsContent() {
           return false;
         }
         return true;
+      })
+      .sort((a, b) => {
+        const tsA = parseUtcTimestampMs(
+          a.first_detected_at || a.detected_at || a.last_seen || a.last_seen_at
+        );
+        const tsB = parseUtcTimestampMs(
+          b.first_detected_at || b.detected_at || b.last_seen || b.last_seen_at
+        );
+        const safeA = isNaN(tsA) ? 0 : tsA;
+        const safeB = isNaN(tsB) ? 0 : tsB;
+        if (safeB !== safeA) return safeB - safeA;
+        return b.usd_value - a.usd_value;
       });
   }, [
     walls,

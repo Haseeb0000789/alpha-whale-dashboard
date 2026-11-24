@@ -211,6 +211,39 @@ function mergeSignalStream(
   return merged;
 }
 
+function mergeWallStream(prev: BidWall[], incoming: BidWall[]): BidWall[] {
+  const prevFirstDetected = new Map<string, string>();
+  for (const w of prev) {
+    const sym = (w.symbol || "").trim().toUpperCase();
+    const firstIso =
+      w.first_detected_at || w.detected_at || w.last_seen || w.last_seen_at;
+    if (sym && firstIso) {
+      prevFirstDetected.set(sym, firstIso);
+    }
+  }
+
+  return incoming.map((w) => {
+    const sym = (w.symbol || "").trim().toUpperCase();
+    const prevIso = prevFirstDetected.get(sym);
+    const incomingFirstIso = w.first_detected_at || w.detected_at;
+    let firstDetectedAt: string | undefined;
+
+    if (prevIso && incomingFirstIso) {
+      firstDetectedAt =
+        prevIso <= incomingFirstIso ? prevIso : incomingFirstIso;
+    } else {
+      firstDetectedAt =
+        incomingFirstIso || prevIso || w.last_seen || w.last_seen_at;
+    }
+
+    return {
+      ...w,
+      first_detected_at: firstDetectedAt,
+      detected_at: firstDetectedAt,
+    };
+  });
+}
+
 interface DashboardSocketState {
   signals: Signal[];
   spotSignals: Signal[];
@@ -521,10 +554,11 @@ export function DashboardSocketProvider({
       if (wallsRes && wallsRes.ok) {
         try {
           const wallsData = await wallsRes.json();
+          const parsedWalls: BidWall[] = Array.isArray(wallsData)
+            ? wallsData
+            : wallsData.walls || [];
           if (isMountedRef.current) {
-            setWalls(
-              Array.isArray(wallsData) ? wallsData : wallsData.walls || []
-            );
+            setWalls((prev) => mergeWallStream(prev, parsedWalls));
           }
         } catch {}
       }
@@ -741,7 +775,9 @@ export function DashboardSocketProvider({
                   }
                 }
                 if (payload.stats) setStats(payload.stats);
-                if (Array.isArray(payload.walls)) setWalls(payload.walls);
+                if (Array.isArray(payload.walls)) {
+                  setWalls((prev) => mergeWallStream(prev, payload.walls));
+                }
 
                 if (payload.timestamp) setLastUpdated(payload.timestamp);
                 setIsInitialLoading(false);

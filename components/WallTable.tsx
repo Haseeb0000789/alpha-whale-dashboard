@@ -9,6 +9,7 @@ import {
   formatCryptoPrice,
   formatRelativeTime,
   getSyncedNowMs,
+  parseUtcTimestampMs,
 } from "@/types/types";
 import { WallCardsSkeleton } from "./Skeletons";
 import {
@@ -26,7 +27,12 @@ interface WallTableProps {
   onBlacklist?: (symbol: string) => Promise<void>;
 }
 
-type SortKey = "relevance" | "usd_value" | "proximity" | "respect_rate";
+type SortKey =
+  | "newest"
+  | "relevance"
+  | "proximity"
+  | "usd_value"
+  | "respect_rate";
 
 function normalizeRespectPct(raw?: number): number {
   if (raw === undefined || raw === null) return 75;
@@ -44,12 +50,12 @@ export default function WallTable({
   selectedSymbol,
   onSelectSymbol,
 }: WallTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("relevance");
+  const [sortKey, setSortKey] = useState<SortKey>("newest");
   const [nowMs, setNowMs] = useState<number>(0);
 
   useEffect(() => {
     const initId = setTimeout(() => setNowMs(getSyncedNowMs()), 0);
-    const id = setInterval(() => setNowMs(getSyncedNowMs()), 30000);
+    const id = setInterval(() => setNowMs(getSyncedNowMs()), 5000);
     return () => {
       clearTimeout(initId);
       clearInterval(id);
@@ -61,12 +67,30 @@ export default function WallTable({
     for (const w of walls) {
       const cleanSym = w.symbol.trim().toUpperCase();
       const existing = map.get(cleanSym);
-      if (
-        !existing ||
-        (w.relevance_score ?? 0) > (existing.relevance_score ?? 0) ||
-        w.usd_value > existing.usd_value
-      ) {
+      if (!existing) {
         map.set(cleanSym, w);
+      } else {
+        const preservedFirst =
+          existing.first_detected_at ||
+          w.first_detected_at ||
+          existing.detected_at ||
+          w.detected_at;
+        if (
+          (w.relevance_score ?? 0) > (existing.relevance_score ?? 0) ||
+          w.usd_value > existing.usd_value
+        ) {
+          map.set(cleanSym, {
+            ...w,
+            first_detected_at: preservedFirst,
+            detected_at: preservedFirst,
+          });
+        } else if (preservedFirst && !existing.first_detected_at) {
+          map.set(cleanSym, {
+            ...existing,
+            first_detected_at: preservedFirst,
+            detected_at: preservedFirst,
+          });
+        }
       }
     }
 
@@ -74,6 +98,20 @@ export default function WallTable({
     return list.sort((a, b) => {
       const symA = a.symbol.trim().toUpperCase();
       const symB = b.symbol.trim().toUpperCase();
+
+      if (sortKey === "newest") {
+        const tsA = parseUtcTimestampMs(
+          a.first_detected_at || a.detected_at || a.last_seen || a.last_seen_at
+        );
+        const tsB = parseUtcTimestampMs(
+          b.first_detected_at || b.detected_at || b.last_seen || b.last_seen_at
+        );
+        const safeA = isNaN(tsA) ? 0 : tsA;
+        const safeB = isNaN(tsB) ? 0 : tsB;
+        if (safeB !== safeA) return safeB - safeA;
+        if (b.usd_value !== a.usd_value) return b.usd_value - a.usd_value;
+        return symA.localeCompare(symB);
+      }
 
       if (sortKey === "relevance") {
         const relA = Math.round((a.relevance_score ?? a.entry_score ?? 50) / 2) * 2;
@@ -120,6 +158,7 @@ export default function WallTable({
           <ArrowUpDown className="ml-1.5 mr-1 h-3 w-3 text-slate-500" />
           {(
             [
+              ["newest", "Newest"],
               ["relevance", "Relevant"],
               ["proximity", "Closest %"],
               ["usd_value", "Size ($)"],
@@ -171,7 +210,22 @@ export default function WallTable({
               );
               const distPct = wall.distance_pct ?? 0.45;
               const midPrice = wall.mid_price || wall.price * (1 + distPct / 100);
-              const seenIso = wall.last_seen || wall.last_seen_at;
+              const firstDetectedIso =
+                wall.first_detected_at ||
+                wall.detected_at ||
+                wall.last_seen ||
+                wall.last_seen_at;
+              const detectedMs = parseUtcTimestampMs(firstDetectedIso);
+              const ageSeconds =
+                nowMs > 0 && !isNaN(detectedMs) && detectedMs > 0
+                  ? Math.max(
+                      0,
+                      Math.floor(
+                        (Math.max(nowMs, getSyncedNowMs()) - detectedMs) / 1000
+                      )
+                    )
+                  : 9999;
+              const isNewWall = nowMs > 0 && ageSeconds <= 120;
               const isSelected =
                 selectedSymbol &&
                 selectedSymbol.trim().toUpperCase() === cleanSym;
@@ -198,7 +252,9 @@ export default function WallTable({
                   onClick={() => onSelectSymbol && onSelectSymbol(cleanSym)}
                   className={`group flex cursor-pointer flex-col justify-between rounded-lg border p-3.5 transition-colors ${
                     isSelected
-                      ? "border-emerald-500/60 bg-[#1E2329]"
+                      ? "border-emerald-500/70 bg-[#1E2329]"
+                      : isNewWall
+                      ? "border-emerald-500/45 bg-[#1E2329] shadow-[0_0_16px_rgba(16,185,129,0.08)] hover:border-emerald-400/60"
                       : "border-[#2B3139] bg-[#1E2329] hover:border-slate-600"
                   }`}
                 >
@@ -206,7 +262,13 @@ export default function WallTable({
                   <div className="flex items-start justify-between gap-2 border-b border-[#2B3139] pb-2.5">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${
+                            isNewWall
+                              ? "animate-pulse bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]"
+                              : "bg-emerald-400"
+                          }`}
+                        />
                         <Link
                           href={`/coin/${encodeURIComponent(cleanSym)}`}
                           onClick={(e) => e.stopPropagation()}
@@ -215,6 +277,11 @@ export default function WallTable({
                           <span>{cleanSym}/USDT</span>
                           <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
                         </Link>
+                        {isNewWall && (
+                          <span className="rounded border border-emerald-400/50 bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-wider text-emerald-300">
+                            NEW
+                          </span>
+                        )}
                         <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-300">
                           {wallScore} pts
                         </span>
@@ -274,8 +341,14 @@ export default function WallTable({
                         </strong>
                       </span>
                       <span className="text-slate-600">•</span>
-                      <span className="text-slate-500">
-                        {formatSafeRelativeTime(seenIso, nowMs)}
+                      <span
+                        className={
+                          isNewWall
+                            ? "font-mono font-semibold text-emerald-400"
+                            : "text-slate-500"
+                        }
+                      >
+                        {formatSafeRelativeTime(firstDetectedIso, nowMs)}
                       </span>
                     </div>
 
