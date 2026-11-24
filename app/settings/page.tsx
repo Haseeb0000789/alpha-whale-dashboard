@@ -9,6 +9,8 @@ import {
   BotSettings,
   ALL_TIMEFRAMES,
   ALL_PATTERNS,
+  DEFAULT_ENABLED_TIMEFRAMES,
+  DEFAULT_ENABLED_PATTERNS,
 } from "@/context/DashboardSocketContext";
 import { formatPatternName } from "@/types/types";
 import { AdminPinGate } from "@/components/AccessGates";
@@ -228,8 +230,8 @@ function ControlCenterContent() {
       enable_audio: true,
       cooldown_minutes: 30,
       max_alerts_per_cycle: 5,
-      enabled_timeframes: [...ALL_TIMEFRAMES],
-      enabled_patterns: [...ALL_PATTERNS],
+      enabled_timeframes: [...DEFAULT_ENABLED_TIMEFRAMES],
+      enabled_patterns: [...DEFAULT_ENABLED_PATTERNS],
     };
     setDraft(null);
     const ok = await saveBotSettings(recommended);

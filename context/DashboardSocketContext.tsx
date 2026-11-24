@@ -46,6 +46,18 @@ export interface BotSettings {
   enabled_patterns: string[];
 }
 
+export const DEFAULT_ENABLED_TIMEFRAMES = ["1h", "4h", "1d"];
+
+export const DEFAULT_ENABLED_PATTERNS = [
+  "double_bottom",
+  "cup_and_handle",
+  "bullish_pennant",
+  "vwap_ema_pullback",
+  "liquidity_sweep_breakout",
+  "order_block_bounce",
+  "institutional_reaccumulation",
+];
+
 export const DEFAULT_SETTINGS: BotSettings = {
   min_score: 65,
   min_wall_usd: 5000,
@@ -56,8 +68,8 @@ export const DEFAULT_SETTINGS: BotSettings = {
   enable_audio: true,
   cooldown_minutes: 30,
   max_alerts_per_cycle: 5,
-  enabled_timeframes: [...ALL_TIMEFRAMES],
-  enabled_patterns: [...ALL_PATTERNS],
+  enabled_timeframes: [...DEFAULT_ENABLED_TIMEFRAMES],
+  enabled_patterns: [...DEFAULT_ENABLED_PATTERNS],
 };
 
 function normalizeBotSettings(
@@ -69,10 +81,10 @@ function normalizeBotSettings(
     ...merged,
     enabled_timeframes: Array.isArray(merged.enabled_timeframes)
       ? merged.enabled_timeframes.map((tf) => String(tf).trim().toLowerCase())
-      : [...ALL_TIMEFRAMES],
+      : [...DEFAULT_ENABLED_TIMEFRAMES],
     enabled_patterns: Array.isArray(merged.enabled_patterns)
       ? merged.enabled_patterns.map((p) => String(p).trim().toLowerCase())
-      : [...ALL_PATTERNS],
+      : [...DEFAULT_ENABLED_PATTERNS],
   };
 }
 
