@@ -1,11 +1,12 @@
 // app/settings/page.tsx
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   useDashboardSocket,
+  resolveApiBase,
   BotSettings,
   ALL_TIMEFRAMES,
   ALL_PATTERNS,
@@ -33,7 +34,24 @@ import {
   Database,
   Trash2,
   Loader2,
+  KeyRound,
+  Copy,
+  Ban,
+  Zap,
+  Crown,
 } from "lucide-react";
+
+interface VipKeyRecord {
+  id: number;
+  key_code: string;
+  plan_type: "7d_trial" | "30d_monthly" | string;
+  label: string;
+  created_at: string;
+  expires_at: string;
+  is_revoked: boolean;
+  status: "active" | "expired" | "revoked";
+  remaining_hours: number;
+}
 
 const SPOT_QUANT_PATTERNS = new Set([
   "vwap_ema_pullback",
@@ -43,7 +61,8 @@ const SPOT_QUANT_PATTERNS = new Set([
 ]);
 
 function ControlCenterContent() {
-  const { settings, saveBotSettings, resetTelemetryData } = useDashboardSocket();
+  const { settings, accessKey, saveBotSettings, resetTelemetryData } =
+    useDashboardSocket();
 
   // Local form draft overlaid on global WebSocket/localStorage settings
   const [draft, setDraft] = useState<Partial<BotSettings> | null>(null);
@@ -71,15 +90,144 @@ function ControlCenterContent() {
   } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showToast = (message: string, variant: "synced" | "local") => {
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current);
+  // VIP Key Generator & Subscription Manager state
+  const [vipKeys, setVipKeys] = useState<VipKeyRecord[]>([]);
+  const [buyerLabel, setBuyerLabel] = useState<string>("");
+  const [isGeneratingKey, setIsGeneratingKey] = useState<boolean>(false);
+  const [newlyGeneratedKey, setNewlyGeneratedKey] =
+    useState<VipKeyRecord | null>(null);
+
+  const showToast = useCallback(
+    (message: string, variant: "synced" | "local") => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+      setToast({ message, variant });
+      toastTimerRef.current = setTimeout(() => {
+        setToast(null);
+        toastTimerRef.current = null;
+      }, 3500);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!accessKey) return;
+    let active = true;
+    const apiBase = resolveApiBase();
+    fetch(`${apiBase}/api/admin/keys`, {
+      cache: "no-store",
+      headers: { "X-Admin-Key": accessKey, "X-Access-Key": accessKey },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !Array.isArray(data)) return;
+        setVipKeys(data);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [accessKey]);
+
+  const handleGenerateVipKey = async (
+    planType: "7d_trial" | "30d_monthly"
+  ) => {
+    if (isGeneratingKey || !accessKey) return;
+    setIsGeneratingKey(true);
+    const apiBase = resolveApiBase();
+    try {
+      const res = await fetch(`${apiBase}/api/admin/keys/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Key": accessKey,
+          "X-Access-Key": accessKey,
+        },
+        body: JSON.stringify({
+          plan_type: planType,
+          label: buyerLabel.trim() || null,
+        }),
+      });
+      if (res.ok) {
+        const created: VipKeyRecord = await res.json();
+        setNewlyGeneratedKey(created);
+        setBuyerLabel("");
+        setVipKeys((prev) => [created, ...prev]);
+        showToast(
+          `Generated ${
+            planType === "7d_trial" ? "7-Day Trial" : "30-Day Monthly"
+          } Key: ${created.key_code}`,
+          "synced"
+        );
+      } else {
+        showToast("Failed to generate VIP key — check Admin session.", "local");
+      }
+    } catch {
+      showToast("Backend unreachable while generating VIP key.", "local");
+    } finally {
+      setIsGeneratingKey(false);
     }
-    setToast({ message, variant });
-    toastTimerRef.current = setTimeout(() => {
-      setToast(null);
-      toastTimerRef.current = null;
-    }, 3500);
+  };
+
+  const handleRevokeVipKey = async (keyId: number, keyCode: string) => {
+    if (!accessKey) return;
+    const apiBase = resolveApiBase();
+    try {
+      const res = await fetch(`${apiBase}/api/admin/keys/${keyId}/revoke`, {
+        method: "POST",
+        headers: { "X-Admin-Key": accessKey, "X-Access-Key": accessKey },
+      });
+      if (res.ok) {
+        const updated: VipKeyRecord = await res.json();
+        setVipKeys((prev) =>
+          prev.map((k) => (k.id === keyId ? updated : k))
+        );
+        if (newlyGeneratedKey?.id === keyId) {
+          setNewlyGeneratedKey(updated);
+        }
+        showToast(`Revoked VIP Key ${keyCode}`, "synced");
+      }
+    } catch {
+      showToast("Failed to revoke key.", "local");
+    }
+  };
+
+  const buildWelcomeMessage = (rec: VipKeyRecord) => {
+    const planLabel =
+      rec.plan_type === "7d_trial"
+        ? "7-Day VIP Trial Pass ($5)"
+        : "30-Day Monthly VIP Access ($15)";
+    const expDate = new Date(rec.expires_at).toUTCString();
+    return (
+      `🐋 Welcome to Alpha Terminal VIP!\n\n` +
+      `🔑 Your VIP Access Key: ${rec.key_code}\n` +
+      `📦 Plan: ${planLabel}\n` +
+      `⏳ Valid Until: ${expDate}\n\n` +
+      `🚀 Unlock Live Signals & L2 Whale Walls here:\n` +
+      `https://alpha-whale-dashboard.vercel.app/signals`
+    );
+  };
+
+  const handleCopyWelcomeMessage = async (rec: VipKeyRecord) => {
+    try {
+      await navigator.clipboard.writeText(buildWelcomeMessage(rec));
+      showToast(
+        `Copied ${rec.key_code} & Telegram welcome message!`,
+        "synced"
+      );
+    } catch {
+      showToast("Clipboard copy failed.", "local");
+    }
+  };
+
+  const handleCopyRawKey = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      showToast(`Copied key ${code} to clipboard!`, "synced");
+    } catch {
+      showToast("Clipboard copy failed.", "local");
+    }
   };
 
   useEffect(() => {
@@ -659,6 +807,191 @@ function ControlCenterContent() {
                   className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-sm font-bold text-white focus:border-cyan-500 focus:outline-none"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* VIP Key Generator & Subscriptions */}
+          <div className="rounded-2xl border border-emerald-500/30 bg-slate-900/60 p-5 backdrop-blur-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <KeyRound className="h-4 w-4 text-emerald-400" />
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">
+                    🔑 VIP Key Generator &amp; Subscriptions
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Issue auto-expiring 7-Day Trial ($5) or 30-Day Monthly ($15) VIP keys
+                  </p>
+                </div>
+              </div>
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300">
+                {vipKeys.filter((k) => k.status === "active").length} Active
+              </span>
+            </div>
+
+            <div className="space-y-2.5">
+              <label className="block text-[11px] font-bold text-slate-300">
+                Buyer Name / Telegram @username (Optional)
+              </label>
+              <input
+                type="text"
+                value={buyerLabel}
+                onChange={(e) => setBuyerLabel(e.target.value)}
+                placeholder="e.g. @ali_trader or Bilal (Easypaisa)"
+                className="w-full rounded-xl border border-slate-700 bg-[#080B12]/90 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+              />
+
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <button
+                  type="button"
+                  disabled={isGeneratingKey}
+                  onClick={() => handleGenerateVipKey("7d_trial")}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3.5 py-2.5 text-xs font-extrabold text-amber-200 transition hover:bg-amber-500/25 disabled:opacity-50"
+                >
+                  <Zap className="h-3.5 w-3.5 text-amber-400" />
+                  <span>⚡ Generate 7-Day Trial ($5)</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isGeneratingKey}
+                  onClick={() => handleGenerateVipKey("30d_monthly")}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/20 px-3.5 py-2.5 text-xs font-extrabold text-emerald-200 transition hover:bg-emerald-500/30 disabled:opacity-50"
+                >
+                  <Crown className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>👑 Generate 30-Day Monthly ($15)</span>
+                </button>
+              </div>
+            </div>
+
+            {newlyGeneratedKey && (
+              <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3.5 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+                      New Key Ready to Send
+                    </span>
+                    <span className="font-mono text-base font-black text-white">
+                      {newlyGeneratedKey.key_code}
+                    </span>
+                  </div>
+                  <span className="rounded border border-emerald-500/30 bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-200">
+                    {newlyGeneratedKey.plan_type === "7d_trial"
+                      ? "7D Trial ($5)"
+                      : "30D Monthly ($15)"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  Expires:{" "}
+                  <strong className="font-mono text-white">
+                    {new Date(newlyGeneratedKey.expires_at).toLocaleString()}
+                  </strong>
+                  {newlyGeneratedKey.label
+                    ? ` • Buyer: ${newlyGeneratedKey.label}`
+                    : ""}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleCopyWelcomeMessage(newlyGeneratedKey)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-extrabold text-slate-950 transition hover:bg-emerald-400"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  <span>📋 Copy Key &amp; Welcome Message</span>
+                </button>
+              </div>
+            )}
+
+            {/* Generated Keys Table / List */}
+            <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+              {vipKeys.length === 0 ? (
+                <p className="py-4 text-center text-xs text-slate-500">
+                  No VIP keys generated yet. Click a plan button above to create one.
+                </p>
+              ) : (
+                vipKeys.map((k) => {
+                  const statusColor =
+                    k.status === "active"
+                      ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-300"
+                      : k.status === "expired"
+                      ? "border-amber-500/30 bg-amber-500/15 text-amber-300"
+                      : "border-rose-500/30 bg-rose-500/15 text-rose-300";
+
+                  const daysLeft = (k.remaining_hours / 24).toFixed(1);
+
+                  return (
+                    <div
+                      key={k.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-[#080B12]/90 px-3 py-2.5 text-xs"
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono font-bold text-white">
+                            {k.key_code}
+                          </span>
+                          <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-300">
+                            {k.plan_type === "7d_trial"
+                              ? "7D Trial"
+                              : "30D Monthly"}
+                          </span>
+                          <span
+                            className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase ${statusColor}`}
+                          >
+                            {k.status}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          {k.label ? (
+                            <span className="text-slate-300 font-semibold">
+                              {k.label} •{" "}
+                            </span>
+                          ) : null}
+                          {k.status === "active" ? (
+                            <span>
+                              {daysLeft}d left (exp{" "}
+                              {new Date(k.expires_at).toLocaleDateString()})
+                            </span>
+                          ) : (
+                            <span>
+                              Exp {new Date(k.expires_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyWelcomeMessage(k)}
+                          title="Copy Key & Telegram Welcome Message"
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 text-[11px] font-semibold text-slate-200 transition hover:border-emerald-500/40 hover:text-emerald-300"
+                        >
+                          <Copy className="h-3 w-3" />
+                          <span>Copy</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyRawKey(k.key_code)}
+                          title="Copy Raw Key Code"
+                          className="rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 font-mono text-[10px] text-slate-300 transition hover:text-white"
+                        >
+                          Key
+                        </button>
+                        {k.status === "active" && (
+                          <button
+                            type="button"
+                            onClick={() => handleRevokeVipKey(k.id, k.key_code)}
+                            title="Revoke Key Immediately"
+                            className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-300 transition hover:bg-rose-500/25"
+                          >
+                            <Ban className="h-3 w-3" />
+                            <span>Revoke</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
