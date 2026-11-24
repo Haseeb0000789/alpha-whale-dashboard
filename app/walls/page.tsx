@@ -30,8 +30,30 @@ function LiveWallsContent() {
     useDashboardSocket();
   const [searchSymbol, setSearchSymbol] = useState<string>("");
   const [exchangeFilter] = useState<"BINANCE">("BINANCE");
-  const [minScore, setMinScore] = useState<number>(75);
-  const [minSizeUsd, setMinSizeUsd] = useState<number>(5000);
+
+  const syncedMinScore = settings?.min_score ?? 68;
+  const syncedMinWallUsd = settings?.min_wall_usd ?? 5000;
+  const maxProximityPct =
+    settings?.max_wall_distance_pct ?? settings?.proximity_pct ?? 1.5;
+
+  const [scoreOverride, setScoreOverride] = useState<{
+    base: number;
+    val: number;
+  } | null>(null);
+  const [sizeOverride, setSizeOverride] = useState<{
+    base: number;
+    val: number;
+  } | null>(null);
+
+  const effectiveMinScore =
+    scoreOverride && scoreOverride.base === syncedMinScore
+      ? scoreOverride.val
+      : syncedMinScore;
+  const minWallUsd =
+    sizeOverride && sizeOverride.base === syncedMinWallUsd
+      ? sizeOverride.val
+      : syncedMinWallUsd;
+
   const [selectedWallSymbol, setSelectedWallSymbol] = useState<string>("");
   const [showDepthDrawer, setShowDepthDrawer] = useState<boolean>(false);
   const [fetchedDepthState, setFetchedDepthState] = useState<{
@@ -39,10 +61,6 @@ function LiveWallsContent() {
     depth?: DepthPoint[];
     bidAskRatio?: number | null;
   } | null>(null);
-
-  const minWallUsd = Math.max(5000, minSizeUsd, settings?.min_wall_usd ?? 5000);
-  const effectiveMinScore = Math.max(75, minScore);
-  const maxProximityPct = settings?.proximity_pct ?? 1.5;
 
   const filteredWalls = useMemo(() => {
     return walls
@@ -233,36 +251,65 @@ function LiveWallsContent() {
           </span>
           <select
             value={effectiveMinScore}
-            onChange={(e) => setMinScore(Math.max(75, Number(e.target.value)))}
+            onChange={(e) =>
+              setScoreOverride({
+                base: syncedMinScore,
+                val: Number(e.target.value),
+              })
+            }
             aria-label="Minimum Wall Score"
             className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-300 focus:outline-none"
           >
+            {![68, 75, 80, 85].includes(syncedMinScore) && (
+              <option value={syncedMinScore} className="bg-[#161A1E] text-white">
+                Score {syncedMinScore}+ (Synced)
+              </option>
+            )}
+            <option value={68} className="bg-[#161A1E] text-white">
+              Score 68+ {syncedMinScore === 68 ? "(Synced)" : ""}
+            </option>
             <option value={75} className="bg-[#161A1E] text-white">
-              Score 75+
+              Score 75+ {syncedMinScore === 75 ? "(Synced)" : ""}
             </option>
             <option value={80} className="bg-[#161A1E] text-white">
-              Score 80+
+              Score 80+ {syncedMinScore === 80 ? "(Synced)" : ""}
             </option>
             <option value={85} className="bg-[#161A1E] text-white">
-              Score 85+
+              Score 85+ {syncedMinScore === 85 ? "(Synced)" : ""}
             </option>
           </select>
           <select
             value={minWallUsd}
-            onChange={(e) => setMinSizeUsd(Math.max(5000, Number(e.target.value)))}
+            onChange={(e) =>
+              setSizeOverride({
+                base: syncedMinWallUsd,
+                val: Number(e.target.value),
+              })
+            }
             aria-label="Minimum Wall Size USD"
             className="rounded border border-[#2B3139] bg-[#1E2329] px-2 py-0.5 font-mono text-[11px] font-bold text-slate-200 focus:outline-none"
           >
+            {![5000, 10000, 15000, 25000].includes(syncedMinWallUsd) && (
+              <option value={syncedMinWallUsd} className="bg-[#161A1E] text-white">
+                Min ${syncedMinWallUsd.toLocaleString()} (Synced)
+              </option>
+            )}
             <option value={5000} className="bg-[#161A1E] text-white">
-              Min $5,000
+              Min $5,000 {syncedMinWallUsd === 5000 ? "(Synced)" : ""}
             </option>
             <option value={10000} className="bg-[#161A1E] text-white">
-              Min $10,000
+              Min $10,000 {syncedMinWallUsd === 10000 ? "(Synced)" : ""}
+            </option>
+            <option value={15000} className="bg-[#161A1E] text-white">
+              Min $15,000 {syncedMinWallUsd === 15000 ? "(Synced)" : ""}
             </option>
             <option value={25000} className="bg-[#161A1E] text-white">
-              Min $25,000
+              Min $25,000 {syncedMinWallUsd === 25000 ? "(Synced)" : ""}
             </option>
           </select>
+          <span className="rounded border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 font-mono text-[11px] font-bold text-purple-300">
+            Max -{maxProximityPct.toFixed(1)}%
+          </span>
         </div>
 
         <div className="flex items-center gap-2">

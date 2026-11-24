@@ -11,7 +11,15 @@ import React, {
   useMemo,
   useTransition,
 } from "react";
-import { Signal, SignalStats, BidWall, syncServerClock } from "@/types/types";
+import {
+  Signal,
+  SignalStats,
+  BidWall,
+  BotSettings,
+  syncServerClock,
+} from "@/types/types";
+
+export type { BotSettings };
 
 export const ALL_TIMEFRAMES = ["15m", "1h", "4h", "1d"];
 
@@ -32,20 +40,6 @@ export const ALL_PATTERNS = [
 
 export type AuthRole = "admin" | "vip" | null;
 
-export interface BotSettings {
-  min_score: number;
-  min_wall_usd: number;
-  proximity_pct: number;
-  enable_dead_cat: boolean;
-  enable_smc: boolean;
-  enable_extension_penalty: boolean;
-  enable_audio: boolean;
-  cooldown_minutes: number;
-  max_alerts_per_cycle: number;
-  enabled_timeframes: string[];
-  enabled_patterns: string[];
-}
-
 export const DEFAULT_ENABLED_TIMEFRAMES = ["1h", "4h", "1d"];
 
 export const DEFAULT_ENABLED_PATTERNS = [
@@ -59,9 +53,12 @@ export const DEFAULT_ENABLED_PATTERNS = [
 ];
 
 export const DEFAULT_SETTINGS: BotSettings = {
-  min_score: 65,
+  min_score: 68,
   min_wall_usd: 5000,
+  max_wall_distance_pct: 1.5,
   proximity_pct: 1.5,
+  telegram_wall_alerts_enabled: false,
+  telegram_min_wall_usd: 15000,
   enable_dead_cat: true,
   enable_smc: true,
   enable_extension_penalty: true,
@@ -76,9 +73,36 @@ function normalizeBotSettings(
   raw: Partial<BotSettings> | null | undefined,
   fallback: BotSettings
 ): BotSettings {
+  const isLegacySchema =
+    raw !== null &&
+    raw !== undefined &&
+    typeof raw === "object" &&
+    !("telegram_min_wall_usd" in raw) &&
+    !("max_wall_distance_pct" in raw);
+
   const merged = { ...fallback, ...(raw ?? {}) };
+  if (isLegacySchema && Number(raw?.min_score ?? 65) === 65) {
+    merged.min_score = 68;
+  }
+
+  const distVal =
+    typeof raw?.max_wall_distance_pct === "number"
+      ? raw.max_wall_distance_pct
+      : typeof raw?.proximity_pct === "number"
+      ? raw.proximity_pct
+      : merged.max_wall_distance_pct ?? merged.proximity_pct ?? 1.5;
+
   return {
     ...merged,
+    min_score: Number(merged.min_score ?? 68) || 68,
+    min_wall_usd: Number(merged.min_wall_usd ?? 5000) || 5000,
+    max_wall_distance_pct: Number(distVal) || 1.5,
+    proximity_pct: Number(distVal) || 1.5,
+    telegram_wall_alerts_enabled: Boolean(
+      merged.telegram_wall_alerts_enabled ?? false
+    ),
+    telegram_min_wall_usd:
+      Number(merged.telegram_min_wall_usd ?? 15000) || 15000,
     enabled_timeframes: Array.isArray(merged.enabled_timeframes)
       ? merged.enabled_timeframes.map((tf) => String(tf).trim().toLowerCase())
       : [...DEFAULT_ENABLED_TIMEFRAMES],
@@ -97,7 +121,12 @@ function isSignalStrategyEnabled(sig: Signal, cfg: BotSettings): boolean {
   const enabledPats = Array.isArray(cfg.enabled_patterns)
     ? cfg.enabled_patterns.map((p) => String(p).trim().toLowerCase())
     : ALL_PATTERNS;
-  return enabledTfs.includes(tf) && enabledPats.includes(pat);
+  const minScoreGate = Number(cfg.min_score ?? 68) || 68;
+  return (
+    enabledTfs.includes(tf) &&
+    enabledPats.includes(pat) &&
+    (sig.confidence ?? 0) >= minScoreGate
+  );
 }
 
 function mergeSignalStream(
@@ -828,6 +857,19 @@ export function DashboardSocketProvider({
       setSpotSignals((prev) =>
         prev.filter((s) => isSignalStrategyEnabled(s, normalized))
       );
+      setWalls((prev) =>
+        prev.filter((w) => {
+          const score = Number(
+            w.score ?? w.wall_score ?? w.entry_score ?? w.relevance_score ?? 0
+          );
+          const dist = Number(w.distance_pct ?? 0);
+          return (
+            score >= normalized.min_score &&
+            w.usd_value >= normalized.min_wall_usd &&
+            dist <= normalized.max_wall_distance_pct
+          );
+        })
+      );
       try {
         localStorage.setItem(
           LOCAL_STORAGE_SETTINGS_KEY,
@@ -860,6 +902,9 @@ export function DashboardSocketProvider({
               JSON.stringify(synced)
             );
           } catch {}
+        }
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send("refresh");
         }
         return true;
       } catch {

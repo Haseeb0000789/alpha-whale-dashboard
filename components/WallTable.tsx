@@ -150,10 +150,10 @@ export default function WallTable({
         <div className="flex flex-col items-center justify-center rounded-lg border border-[#2B3139] bg-[#1E2329] px-4 py-14 text-center text-xs text-slate-400">
           <Layers className="mb-2 h-6 w-6 opacity-40" />
           <span className="font-semibold text-slate-300">
-            No active Binance bid walls currently meet the 75+ Score &amp; $5,000+ minimum size filter.
+            No active Binance bid walls currently meet the synced Control Center score &amp; size filter.
           </span>
           <span className="mt-1 text-[11px] text-slate-500">
-            Only institutional-grade Binance L2 liquidity walls (Score &ge; 75, Value &ge; $5,000) are displayed here.
+            Only institutional-grade Binance L2 liquidity walls matching your active thresholds are displayed here.
           </span>
         </div>
       ) : (
@@ -162,15 +162,12 @@ export default function WallTable({
             {sortedWalls.map((wall) => {
               const cleanSym = wall.symbol.trim().toUpperCase();
               const respectPct = normalizeRespectPct(wall.respect_rate);
-              const wallScore = Math.max(
-                75,
-                Math.round(
-                  wall.score ??
-                    wall.wall_score ??
-                    wall.entry_score ??
-                    wall.relevance_score ??
-                    75
-                )
+              const wallScore = Math.round(
+                wall.score ??
+                  wall.wall_score ??
+                  wall.entry_score ??
+                  wall.relevance_score ??
+                  68
               );
               const distPct = wall.distance_pct ?? 0.45;
               const midPrice = wall.mid_price || wall.price * (1 + distPct / 100);

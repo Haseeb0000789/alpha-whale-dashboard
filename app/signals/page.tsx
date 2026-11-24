@@ -61,8 +61,15 @@ function SignalsGridContent() {
   const [selectedTf, setSelectedTf] = useState<TimeframeFilter>("ALL");
   const [selectedPattern, setSelectedPattern] = useState<string>("ALL");
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("ALL");
-  const [customMinScore, setCustomMinScore] = useState<number | null>(null);
-  const minScore = customMinScore ?? (settings?.min_score ?? 65);
+  const syncedMinScore = settings?.min_score ?? 68;
+  const [customScoreState, setCustomScoreState] = useState<{
+    base: number;
+    val: number;
+  } | null>(null);
+  const minScore =
+    customScoreState && customScoreState.base === syncedMinScore
+      ? customScoreState.val
+      : syncedMinScore;
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [onlyReady, setOnlyReady] = useState<boolean>(false);
   const [sortMode, setSortMode] = useState<SortMode>("relevance");
@@ -273,7 +280,7 @@ function SignalsGridContent() {
     setSpotStyleFilter("ALL");
     setOnlyReady(false);
     setSearchQuery("");
-    setCustomMinScore(null);
+    setCustomScoreState(null);
   };
 
   return (
@@ -499,7 +506,12 @@ function SignalsGridContent() {
               min={0}
               max={100}
               value={minScore}
-              onChange={(e) => setCustomMinScore(Number(e.target.value))}
+              onChange={(e) =>
+                setCustomScoreState({
+                  base: syncedMinScore,
+                  val: Number(e.target.value),
+                })
+              }
               className="h-1 w-20 cursor-pointer appearance-none rounded bg-slate-800 accent-slate-300"
             />
             <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-300">

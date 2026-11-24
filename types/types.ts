@@ -176,6 +176,23 @@ export interface EquityCurvePoint {
 
 export type TimeframeFilter = "ALL" | "15m" | "1h" | "4h" | "1d";
 
+export interface BotSettings {
+  min_score: number;
+  min_wall_usd: number;
+  max_wall_distance_pct: number;
+  proximity_pct: number;
+  telegram_wall_alerts_enabled: boolean;
+  telegram_min_wall_usd: number;
+  enable_dead_cat: boolean;
+  enable_smc: boolean;
+  enable_extension_penalty: boolean;
+  enable_audio: boolean;
+  cooldown_minutes: number;
+  max_alerts_per_cycle: number;
+  enabled_timeframes: string[];
+  enabled_patterns: string[];
+}
+
 export function formatCryptoPrice(price: number | undefined | null): string {
   if (price === undefined || price === null || isNaN(price) || price === 0) {
     return "—";

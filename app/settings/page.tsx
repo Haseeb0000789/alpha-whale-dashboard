@@ -369,9 +369,12 @@ function ControlCenterContent() {
 
   const handleResetDefaults = async () => {
     const recommended: BotSettings = {
-      min_score: 65,
+      min_score: 68,
       min_wall_usd: 5000,
+      max_wall_distance_pct: 1.5,
       proximity_pct: 1.5,
+      telegram_wall_alerts_enabled: false,
+      telegram_min_wall_usd: 15000,
       enable_dead_cat: true,
       enable_smc: true,
       enable_extension_penalty: true,
@@ -385,7 +388,7 @@ function ControlCenterContent() {
     const ok = await saveBotSettings(recommended);
     showToast(
       ok
-        ? "Restored Recommended Institutional Defaults (Min Score: 65)"
+        ? "Restored Recommended Institutional Defaults (Min Score: 68)"
         : "Restored Recommended Defaults locally (Backend offline)",
       ok ? "synced" : "local"
     );
@@ -414,7 +417,7 @@ function ControlCenterContent() {
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Configure 4-Pillar scanner thresholds, L2 Bid Wall filters &amp; active strategy gates
+              Single source of truth for Web Terminal (/signals &amp; /walls), WebSockets &amp; Telegram Bot
             </p>
           </div>
         </div>
@@ -426,7 +429,7 @@ function ControlCenterContent() {
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700/70 bg-slate-800/60 px-3.5 py-2 text-xs font-bold text-slate-300 transition hover:border-slate-600 hover:text-white"
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            <span>Reset Recommended (65)</span>
+            <span>Reset Recommended (68)</span>
           </button>
 
           <button
@@ -461,10 +464,10 @@ function ControlCenterContent() {
               <div className="flex items-center justify-between">
                 <div>
                   <label className="text-xs font-bold text-white">
-                    Minimum 4-Pillar Signal Score (Global Gate)
+                    Minimum 4-Pillar Signal Score
                   </label>
                   <p className="text-[11px] text-slate-400">
-                    Signals below this score are blocked in both Scanner &amp; Signals Grid
+                    Unified gate for Alpha &amp; Spot signals, Web Radar &amp; Telegram Bot
                   </p>
                 </div>
                 <span className="rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-1 font-mono text-base font-black text-cyan-300">
@@ -484,23 +487,23 @@ function ControlCenterContent() {
               />
               <div className="flex justify-between font-mono text-[10px] text-slate-500">
                 <span>40 (Loose)</span>
-                <span>55 (Default)</span>
+                <span>55 (Moderate)</span>
                 <span className="text-emerald-400 font-bold">
-                  65–70 (Recommended Institutional)
+                  68 (Recommended Institutional)
                 </span>
                 <span>90 (Strict)</span>
               </div>
             </div>
 
-            {/* 2. Minimum Bid Wall Size (USD) */}
+            {/* 2. Web Radar Min Bid Wall Size (USD) */}
             <div className="rounded-xl border border-slate-800 bg-[#080B12]/90 p-4 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div>
                   <label className="text-xs font-bold text-white">
-                    Minimum Whale Bid Wall Size (USD)
+                    Web Radar Min Bid Wall Size (USD)
                   </label>
                   <p className="text-[11px] text-slate-400">
-                    Minimum L2 order book cluster required to trigger wall tracking
+                    Governs Binance L2 Bid Walls on the Web /walls Radar &amp; WebSocket stream
                   </p>
                 </div>
                 <span className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 font-mono text-base font-black text-emerald-300">
@@ -520,25 +523,25 @@ function ControlCenterContent() {
               />
               <div className="flex justify-between font-mono text-[10px] text-slate-500">
                 <span>$2,000</span>
-                <span>$5,000</span>
+                <span className="text-emerald-400 font-bold">$5,000 (Default)</span>
                 <span>$15,000</span>
                 <span>$50,000</span>
               </div>
             </div>
 
-            {/* 3. Wall Proximity Percentage */}
+            {/* 3. Max Bid Wall Distance (%) */}
             <div className="rounded-xl border border-slate-800 bg-[#080B12]/90 p-4 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div>
                   <label className="text-xs font-bold text-white">
-                    Max Bid Wall Distance from Price (%)
+                    Max Bid Wall Distance (%)
                   </label>
                   <p className="text-[11px] text-slate-400">
-                    Only count bid walls sitting within this % below current mid-price
+                    Filters out bid walls sitting further than this % below current mid-price
                   </p>
                 </div>
                 <span className="rounded-lg border border-purple-500/40 bg-purple-500/15 px-3 py-1 font-mono text-base font-black text-purple-300">
-                  -{formData.proximity_pct.toFixed(1)}%
+                  -{(formData.max_wall_distance_pct ?? formData.proximity_pct ?? 1.5).toFixed(1)}%
                 </span>
               </div>
               <input
@@ -546,16 +549,95 @@ function ControlCenterContent() {
                 min={0.3}
                 max={4.0}
                 step={0.1}
-                value={formData.proximity_pct}
-                onChange={(e) =>
-                  updateField("proximity_pct", Number(e.target.value))
-                }
+                value={formData.max_wall_distance_pct ?? formData.proximity_pct ?? 1.5}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setDraft((prev) => ({
+                    ...(prev ?? {}),
+                    max_wall_distance_pct: val,
+                    proximity_pct: val,
+                  }));
+                }}
                 className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-slate-800 accent-purple-400"
               />
               <div className="flex justify-between font-mono text-[10px] text-slate-500">
                 <span>0.3% (Scalp)</span>
-                <span>1.5% (Optimal)</span>
+                <span className="text-purple-400 font-bold">1.5% (Optimal)</span>
                 <span>4.0% (Wide)</span>
+              </div>
+            </div>
+
+            {/* 4. Telegram Wall Alerts Toggle & Telegram Min Whale Wall Size (USD) */}
+            <div className="rounded-xl border border-amber-500/30 bg-[#080B12]/90 p-4 space-y-3">
+              <label className="flex cursor-pointer items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white">
+                      Telegram Wall Alerts Toggle
+                    </span>
+                    <span
+                      className={`rounded border px-2 py-0.5 font-mono text-[10px] font-bold uppercase ${
+                        formData.telegram_wall_alerts_enabled
+                          ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                          : "border-slate-700 bg-slate-800/80 text-slate-400"
+                      }`}
+                    >
+                      {formData.telegram_wall_alerts_enabled
+                        ? "ON (Bundled Digest)"
+                        : "OFF (Breakouts Only)"}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-400">
+                    Default OFF keeps Telegram clean for breakout signals. When ON, only 85+ Score Binance walls &ge; threshold below are sent as a bundled digest (2h cooldown).
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.telegram_wall_alerts_enabled)}
+                  onChange={(e) =>
+                    updateField(
+                      "telegram_wall_alerts_enabled",
+                      e.target.checked
+                    )
+                  }
+                  className="h-4 w-4 shrink-0 rounded accent-amber-400"
+                />
+              </label>
+
+              <div className="border-t border-slate-800/80 pt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-white">
+                      Telegram Min Whale Wall Size (USD)
+                    </label>
+                    <p className="text-[11px] text-slate-400">
+                      Eliminates $5k micro-wall spam on Telegram (requires Score &ge; 85)
+                    </p>
+                  </div>
+                  <span className="rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-1 font-mono text-base font-black text-amber-300">
+                    ${(formData.telegram_min_wall_usd ?? 15000).toLocaleString()}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={5000}
+                  max={100000}
+                  step={2500}
+                  value={formData.telegram_min_wall_usd ?? 15000}
+                  onChange={(e) =>
+                    updateField(
+                      "telegram_min_wall_usd",
+                      Number(e.target.value)
+                    )
+                  }
+                  className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-slate-800 accent-amber-400"
+                />
+                <div className="flex justify-between font-mono text-[10px] text-slate-500">
+                  <span>$5,000</span>
+                  <span className="text-amber-400 font-bold">$15,000 (Recommended)</span>
+                  <span>$50,000</span>
+                  <span>$100,000</span>
+                </div>
               </div>
             </div>
           </div>
