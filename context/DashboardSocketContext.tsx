@@ -30,6 +30,8 @@ export const ALL_PATTERNS = [
   "institutional_reaccumulation",
 ];
 
+export type AuthRole = "admin" | "vip" | null;
+
 export interface BotSettings {
   min_score: number;
   min_wall_usd: number;
@@ -155,6 +157,10 @@ interface DashboardSocketState {
   isConnected: boolean;
   isInitialLoading: boolean;
   lastUpdated: string | null;
+  accessKey: string;
+  authRole: AuthRole;
+  verifyAccessKey: (key: string) => Promise<AuthRole>;
+  logoutAccess: () => void;
   triggerRefresh: () => void;
   saveBotSettings: (newSettings: BotSettings) => Promise<boolean>;
   resetTelemetryData: () => Promise<boolean>;
@@ -169,6 +175,10 @@ const DashboardSocketContext = createContext<DashboardSocketState>({
   isConnected: false,
   isInitialLoading: true,
   lastUpdated: null,
+  accessKey: "",
+  authRole: null,
+  verifyAccessKey: async () => null,
+  logoutAccess: () => {},
   triggerRefresh: () => {},
   saveBotSettings: async () => false,
   resetTelemetryData: async () => false,
@@ -177,6 +187,7 @@ const DashboardSocketContext = createContext<DashboardSocketState>({
 export const useDashboardSocket = () => useContext(DashboardSocketContext);
 
 const LOCAL_STORAGE_SETTINGS_KEY = "alpha_whale_bot_settings_v5";
+const LOCAL_STORAGE_AUTH_KEY = "alpha_whale_auth_v1";
 
 export function resolveApiBase(): string {
   if (process.env.NEXT_PUBLIC_API_URL) {
@@ -189,9 +200,10 @@ export function resolveApiBase(): string {
   return "http://localhost:8000";
 }
 
-function resolveWsUrl(): string {
-  const base = resolveApiBase();
-  return base.replace(/^http/, "ws") + "/ws/dashboard";
+function resolveWsUrl(token?: string): string {
+  const base = resolveApiBase().replace(/^http/, "ws") + "/ws/dashboard";
+  const clean = (token || "").trim();
+  return clean ? `${base}?token=${encodeURIComponent(clean)}` : base;
 }
 
 function signalIdentityKey(sig: Signal): string {
@@ -214,11 +226,16 @@ export function DashboardSocketProvider({
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [accessKey, setAccessKey] = useState<string>("");
+  const [authRole, setAuthRole] = useState<AuthRole>(null);
+  const [authHydrated, setAuthHydrated] = useState<boolean>(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef<boolean>(true);
   const settingsRef = useRef<BotSettings>(DEFAULT_SETTINGS);
+  const accessKeyRef = useRef<string>("");
+  const authRoleRef = useRef<AuthRole>(null);
   const [, startTransition] = useTransition();
 
   // --- AUDIO ALARM SETUP (Safari & Mobile Fix + Audio Toggle & 75+ Score Gate) ---
@@ -233,6 +250,11 @@ export function DashboardSocketProvider({
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  useEffect(() => {
+    accessKeyRef.current = accessKey;
+    authRoleRef.current = authRole;
+  }, [accessKey, authRole]);
 
   useEffect(() => {
     const unlockAudio = () => {
@@ -269,7 +291,7 @@ export function DashboardSocketProvider({
       const gainNode = ctx.createGain();
 
       oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(880, ctx.currentTime); // 880Hz beep
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime);
 
       gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
       gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
@@ -281,44 +303,92 @@ export function DashboardSocketProvider({
         try {
           oscillator.disconnect();
           gainNode.disconnect();
-        } catch {
-          // Ignore disconnect errors
-        }
+        } catch {}
       };
 
       oscillator.start();
       oscillator.stop(ctx.currentTime + 0.3);
     }
   }, []);
-  // ------------------------------------------------
 
-  // 1. Load cached settings from localStorage immediately on client mount
+  // 1. Load cached settings & saved VIP/Admin auth state from localStorage on client mount
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
+      const savedSettings = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
         setSettings((prev) => {
           const merged = normalizeBotSettings(parsed, prev);
           settingsRef.current = merged;
           return merged;
         });
       }
-    } catch {
-      // Ignore storage errors
-    }
+    } catch {}
+
+    try {
+      const savedAuth = localStorage.getItem(LOCAL_STORAGE_AUTH_KEY);
+      if (savedAuth) {
+        const parsedAuth = JSON.parse(savedAuth);
+        const k = typeof parsedAuth?.key === "string" ? parsedAuth.key.trim() : "";
+        const r: AuthRole =
+          parsedAuth?.role === "admin" || parsedAuth?.role === "vip"
+            ? parsedAuth.role
+            : null;
+        if (k && r) {
+          accessKeyRef.current = k;
+          authRoleRef.current = r;
+          setAccessKey(k);
+          setAuthRole(r);
+        }
+      }
+    } catch {}
+
+    setAuthHydrated(true);
   }, []);
 
-  // 2. Fetch initial HTTP snapshot (alpha + spot signals) + saved backend settings
-  const fetchInitialHttpSnapshot = useCallback(async () => {
+  // 2. Fetch initial HTTP snapshot (public stats/settings + VIP-gated signals/walls when authorized)
+  const fetchInitialHttpSnapshot = useCallback(async (keyOverride?: string) => {
     const apiBase = resolveApiBase();
+    const activeKey = (
+      keyOverride !== undefined ? keyOverride : accessKeyRef.current
+    ).trim();
+    const authHeaders: HeadersInit | undefined = activeKey
+      ? { "X-Access-Key": activeKey }
+      : undefined;
+
     try {
+      const statsPromise = fetch(`${apiBase}/api/signals/stats`, {
+        cache: "no-store",
+      });
+      const setPromise = fetch(`${apiBase}/api/settings`, {
+        cache: "no-store",
+      });
+
+      const sigPromise = activeKey
+        ? fetch(`${apiBase}/api/signals`, {
+            cache: "no-store",
+            headers: authHeaders,
+          })
+        : Promise.resolve(null);
+      const spotPromise = activeKey
+        ? fetch(`${apiBase}/api/signals/spot`, {
+            cache: "no-store",
+            headers: authHeaders,
+          })
+        : Promise.resolve(null);
+      const wallsPromise = activeKey
+        ? fetch(`${apiBase}/api/walls/active`, {
+            cache: "no-store",
+            headers: authHeaders,
+          })
+        : Promise.resolve(null);
+
       const [sigRes, spotRes, statsRes, wallsRes, setRes] = await Promise.all([
-        fetch(`${apiBase}/api/signals`, { cache: "no-store" }),
-        fetch(`${apiBase}/api/signals/spot`, { cache: "no-store" }),
-        fetch(`${apiBase}/api/signals/stats`, { cache: "no-store" }),
-        fetch(`${apiBase}/api/walls/active`, { cache: "no-store" }),
-        fetch(`${apiBase}/api/settings`, { cache: "no-store" }),
+        sigPromise,
+        spotPromise,
+        statsPromise,
+        wallsPromise,
+        setPromise,
       ]);
 
       if (!isMountedRef.current) return;
@@ -336,8 +406,18 @@ export function DashboardSocketProvider({
         } catch {}
       }
 
-      // Spot signals — independent fetch (preserved across transient empty cycles)
-      if (spotRes.ok) {
+      if (statsRes.ok) {
+        try {
+          const statsData = await statsRes.json();
+          const serverDateHeader = statsRes.headers.get("date");
+          syncServerClock(serverDateHeader);
+          if (isMountedRef.current) {
+            setStats(statsData);
+          }
+        } catch {}
+      }
+
+      if (spotRes && spotRes.ok) {
         try {
           const spotData = await spotRes.json();
           const parsedSpot: Signal[] = Array.isArray(spotData)
@@ -352,39 +432,43 @@ export function DashboardSocketProvider({
               mergeSignalStream(prev, parsedSpot, settingsRef.current, true)
             );
           }
-        } catch {
-          // Ignore malformed spot payload
-        }
+        } catch {}
       }
 
-      if (!sigRes.ok || !statsRes.ok || !wallsRes.ok) {
-        if (isMountedRef.current) setIsInitialLoading(false);
-        return;
+      if (sigRes && sigRes.ok) {
+        try {
+          const sigData = await sigRes.json();
+          const parsedSignals: Signal[] = Array.isArray(sigData)
+            ? sigData
+            : sigData.signals || [];
+          const serverDateHeader = sigRes.headers.get("date");
+          syncServerClock(serverDateHeader, parsedSignals);
+          knownAlphaKeysRef.current = new Set(
+            parsedSignals.map(signalIdentityKey)
+          );
+          hasSeededAlphaRef.current = true;
+          if (isMountedRef.current) {
+            setSignals((prev) =>
+              mergeSignalStream(prev, parsedSignals, settingsRef.current, false)
+            );
+          }
+        } catch {}
       }
 
-      const [sigData, statsData, wallsData] = await Promise.all([
-        sigRes.json(),
-        statsRes.json(),
-        wallsRes.json(),
-      ]);
+      if (wallsRes && wallsRes.ok) {
+        try {
+          const wallsData = await wallsRes.json();
+          if (isMountedRef.current) {
+            setWalls(
+              Array.isArray(wallsData) ? wallsData : wallsData.walls || []
+            );
+          }
+        } catch {}
+      }
 
-      if (!isMountedRef.current) return;
-
-      startTransition(() => {
-        const parsedSignals: Signal[] = Array.isArray(sigData)
-          ? sigData
-          : sigData.signals || [];
-        const serverDateHeader = sigRes.headers.get("date");
-        syncServerClock(serverDateHeader, parsedSignals);
-        knownAlphaKeysRef.current = new Set(parsedSignals.map(signalIdentityKey));
-        hasSeededAlphaRef.current = true;
-        setSignals((prev) =>
-          mergeSignalStream(prev, parsedSignals, settingsRef.current, false)
-        );
-        setStats(statsData);
-        setWalls(Array.isArray(wallsData) ? wallsData : wallsData.walls || []);
+      if (isMountedRef.current) {
         setIsInitialLoading(false);
-      });
+      }
     } catch {
       if (isMountedRef.current) {
         setIsInitialLoading(false);
@@ -392,248 +476,257 @@ export function DashboardSocketProvider({
     }
   }, []);
 
-  const connectWebSocket = useCallback(() => {
-    if (typeof window === "undefined" || !isMountedRef.current) return;
+  const connectWebSocket = useCallback(
+    (keyOverride?: string) => {
+      if (typeof window === "undefined" || !isMountedRef.current) return;
 
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-
-    if (wsRef.current) {
-      try {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-      } catch {}
-      wsRef.current = null;
-    }
-
-    try {
-      const wsUrl = resolveWsUrl();
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (!isMountedRef.current) {
-          ws.close();
-          return;
-        }
-        setIsConnected(true);
-      };
-
-      ws.onmessage = (event) => {
-        if (!isMountedRef.current) return;
-        try {
-          const payload = JSON.parse(event.data);
-
-          // Explicit NEW_SIGNAL event (alpha signals only)
-          if (payload.type === "NEW_SIGNAL" && payload.data) {
-            const incoming: Signal = payload.data;
-            if (!isSignalStrategyEnabled(incoming, settingsRef.current)) return;
-            knownAlphaKeysRef.current.add(signalIdentityKey(incoming));
-            hasSeededAlphaRef.current = true;
-            playAlarm(incoming.confidence);
-            setSignals((prev) =>
-              mergeSignalStream(
-                prev,
-                [incoming, ...prev],
-                settingsRef.current,
-                false
-              )
-            );
-            return;
-          }
-
-          // Explicit NEW_SPOT_SIGNAL event
-          if (payload.type === "NEW_SPOT_SIGNAL" && payload.data) {
-            const incoming: Signal = payload.data;
-            if (!isSignalStrategyEnabled(incoming, settingsRef.current)) return;
-            knownSpotKeysRef.current.add(signalIdentityKey(incoming));
-            hasSeededSpotRef.current = true;
-            playAlarm(incoming.confidence);
-            setSpotSignals((prev) =>
-              mergeSignalStream(
-                prev,
-                [incoming, ...prev],
-                settingsRef.current,
-                true
-              )
-            );
-            return;
-          }
-
-          if (payload.type === "snapshot") {
-            let activeCfg = settingsRef.current;
-            if (payload.settings) {
-              activeCfg = normalizeBotSettings(payload.settings, activeCfg);
-              settingsRef.current = activeCfg;
-            }
-
-            syncServerClock(
-              payload.timestamp,
-              Array.isArray(payload.signals) ? payload.signals : undefined
-            );
-            // Check for genuinely new high-score (>=75) Alpha signals
-            if (Array.isArray(payload.signals)) {
-              const incomingAlpha: Signal[] = payload.signals.filter((s: Signal) =>
-                isSignalStrategyEnabled(s, activeCfg)
-              );
-              if (hasSeededAlphaRef.current) {
-                let maxNewScore = -1;
-                for (const s of incomingAlpha) {
-                  const key = signalIdentityKey(s);
-                  if (!knownAlphaKeysRef.current.has(key)) {
-                    maxNewScore = Math.max(maxNewScore, s.confidence ?? 0);
-                  }
-                }
-                if (maxNewScore >= 75) {
-                  playAlarm(maxNewScore);
-                }
-              }
-              knownAlphaKeysRef.current = new Set(
-                incomingAlpha.map(signalIdentityKey)
-              );
-              hasSeededAlphaRef.current = true;
-            }
-
-            // Check for genuinely new high-score (>=75) Spot signals
-            if (Array.isArray(payload.spot_signals)) {
-              const incomingSpot: Signal[] = payload.spot_signals.filter(
-                (s: Signal) => isSignalStrategyEnabled(s, activeCfg)
-              );
-              if (incomingSpot.length > 0) {
-                if (hasSeededSpotRef.current) {
-                  let maxNewSpotScore = -1;
-                  for (const s of incomingSpot) {
-                    const key = signalIdentityKey(s);
-                    if (!knownSpotKeysRef.current.has(key)) {
-                      maxNewSpotScore = Math.max(
-                        maxNewSpotScore,
-                        s.confidence ?? 0
-                      );
-                    }
-                  }
-                  if (maxNewSpotScore >= 75) {
-                    playAlarm(maxNewSpotScore);
-                  }
-                }
-                for (const s of incomingSpot) {
-                  knownSpotKeysRef.current.add(signalIdentityKey(s));
-                }
-                hasSeededSpotRef.current = true;
-              } else if (
-                Date.now() - lastSpotFallbackFetchRef.current > 15000 &&
-                activeCfg.enabled_timeframes.length > 0 &&
-                activeCfg.enabled_patterns.length > 0
-              ) {
-                // If WS snapshot arrived before the Spot scanner completed its first pass,
-                // trigger a non-blocking REST request to `/api/signals/spot`.
-                lastSpotFallbackFetchRef.current = Date.now();
-                const apiBase = resolveApiBase();
-                fetch(`${apiBase}/api/signals/spot`, { cache: "no-store" })
-                  .then((r) => (r.ok ? r.json() : null))
-                  .then((spotJson) => {
-                    if (!spotJson || !isMountedRef.current) return;
-                    const parsed: Signal[] = Array.isArray(spotJson)
-                      ? spotJson
-                      : spotJson.signals || spotJson.spot_signals || [];
-                    if (parsed.length > 0) {
-                      setSpotSignals((prev) =>
-                        mergeSignalStream(
-                          prev,
-                          parsed,
-                          settingsRef.current,
-                          true
-                        )
-                      );
-                    }
-                  })
-                  .catch(() => {});
-              }
-            }
-
-            startTransition(() => {
-              if (payload.settings) {
-                setSettings(activeCfg);
-                try {
-                  localStorage.setItem(
-                    LOCAL_STORAGE_SETTINGS_KEY,
-                    JSON.stringify(activeCfg)
-                  );
-                } catch {}
-              }
-              if (Array.isArray(payload.signals)) {
-                setSignals((prev) =>
-                  mergeSignalStream(prev, payload.signals, activeCfg, false)
-                );
-              }
-              if (Array.isArray(payload.spot_signals)) {
-                const isResetSnapshot =
-                  payload.spot_signals.length === 0 &&
-                  Array.isArray(payload.signals) &&
-                  payload.signals.length === 0 &&
-                  payload.stats?.total_signals === 0;
-                if (isResetSnapshot) {
-                  knownSpotKeysRef.current.clear();
-                  setSpotSignals([]);
-                } else {
-                  setSpotSignals((prev) =>
-                    mergeSignalStream(
-                      prev,
-                      payload.spot_signals,
-                      activeCfg,
-                      true
-                    )
-                  );
-                }
-              }
-              if (payload.stats) setStats(payload.stats);
-              if (Array.isArray(payload.walls)) setWalls(payload.walls);
-
-              if (payload.timestamp) setLastUpdated(payload.timestamp);
-              setIsInitialLoading(false);
-            });
-          }
-        } catch {
-          // Ignore malformed frames
-        }
-      };
-
-      ws.onclose = () => {
-        if (!isMountedRef.current) return;
-        setIsConnected(false);
-        if (wsRef.current === ws) {
-          wsRef.current = null;
-        }
-        reconnectTimeoutRef.current = setTimeout(() => {
-          if (isMountedRef.current) {
-            reconnectFnRef.current();
-          }
-        }, 2000);
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
-    } catch {
-      if (isMountedRef.current) {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          if (isMountedRef.current) {
-            reconnectFnRef.current();
-          }
-        }, 3000);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
-    }
-  }, [playAlarm]);
+
+      if (wsRef.current) {
+        try {
+          wsRef.current.onclose = null;
+          wsRef.current.close();
+        } catch {}
+        wsRef.current = null;
+      }
+
+      try {
+        const activeKey =
+          keyOverride !== undefined ? keyOverride : accessKeyRef.current;
+        const wsUrl = resolveWsUrl(activeKey);
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          if (!isMountedRef.current) {
+            ws.close();
+            return;
+          }
+          setIsConnected(true);
+        };
+
+        ws.onmessage = (event) => {
+          if (!isMountedRef.current) return;
+          try {
+            const payload = JSON.parse(event.data);
+
+            // Explicit NEW_SIGNAL event (alpha signals only)
+            if (payload.type === "NEW_SIGNAL" && payload.data) {
+              const incoming: Signal = payload.data;
+              if (!isSignalStrategyEnabled(incoming, settingsRef.current))
+                return;
+              knownAlphaKeysRef.current.add(signalIdentityKey(incoming));
+              hasSeededAlphaRef.current = true;
+              playAlarm(incoming.confidence);
+              setSignals((prev) =>
+                mergeSignalStream(
+                  prev,
+                  [incoming, ...prev],
+                  settingsRef.current,
+                  false
+                )
+              );
+              return;
+            }
+
+            // Explicit NEW_SPOT_SIGNAL event
+            if (payload.type === "NEW_SPOT_SIGNAL" && payload.data) {
+              const incoming: Signal = payload.data;
+              if (!isSignalStrategyEnabled(incoming, settingsRef.current))
+                return;
+              knownSpotKeysRef.current.add(signalIdentityKey(incoming));
+              hasSeededSpotRef.current = true;
+              playAlarm(incoming.confidence);
+              setSpotSignals((prev) =>
+                mergeSignalStream(
+                  prev,
+                  [incoming, ...prev],
+                  settingsRef.current,
+                  true
+                )
+              );
+              return;
+            }
+
+            if (payload.type === "snapshot") {
+              let activeCfg = settingsRef.current;
+              if (payload.settings) {
+                activeCfg = normalizeBotSettings(payload.settings, activeCfg);
+                settingsRef.current = activeCfg;
+              }
+
+              syncServerClock(
+                payload.timestamp,
+                Array.isArray(payload.signals) ? payload.signals : undefined
+              );
+
+              if (Array.isArray(payload.signals)) {
+                const incomingAlpha: Signal[] = payload.signals.filter(
+                  (s: Signal) => isSignalStrategyEnabled(s, activeCfg)
+                );
+                if (hasSeededAlphaRef.current) {
+                  let maxNewScore = -1;
+                  for (const s of incomingAlpha) {
+                    const key = signalIdentityKey(s);
+                    if (!knownAlphaKeysRef.current.has(key)) {
+                      maxNewScore = Math.max(maxNewScore, s.confidence ?? 0);
+                    }
+                  }
+                  if (maxNewScore >= 75) {
+                    playAlarm(maxNewScore);
+                  }
+                }
+                knownAlphaKeysRef.current = new Set(
+                  incomingAlpha.map(signalIdentityKey)
+                );
+                hasSeededAlphaRef.current = true;
+              }
+
+              if (Array.isArray(payload.spot_signals)) {
+                const incomingSpot: Signal[] = payload.spot_signals.filter(
+                  (s: Signal) => isSignalStrategyEnabled(s, activeCfg)
+                );
+                if (incomingSpot.length > 0) {
+                  if (hasSeededSpotRef.current) {
+                    let maxNewSpotScore = -1;
+                    for (const s of incomingSpot) {
+                      const key = signalIdentityKey(s);
+                      if (!knownSpotKeysRef.current.has(key)) {
+                        maxNewSpotScore = Math.max(
+                          maxNewSpotScore,
+                          s.confidence ?? 0
+                        );
+                      }
+                    }
+                    if (maxNewSpotScore >= 75) {
+                      playAlarm(maxNewSpotScore);
+                    }
+                  }
+                  for (const s of incomingSpot) {
+                    knownSpotKeysRef.current.add(signalIdentityKey(s));
+                  }
+                  hasSeededSpotRef.current = true;
+                } else if (
+                  accessKeyRef.current &&
+                  Date.now() - lastSpotFallbackFetchRef.current > 15000 &&
+                  activeCfg.enabled_timeframes.length > 0 &&
+                  activeCfg.enabled_patterns.length > 0
+                ) {
+                  lastSpotFallbackFetchRef.current = Date.now();
+                  const apiBase = resolveApiBase();
+                  fetch(`${apiBase}/api/signals/spot`, {
+                    cache: "no-store",
+                    headers: { "X-Access-Key": accessKeyRef.current },
+                  })
+                    .then((r) => (r.ok ? r.json() : null))
+                    .then((spotJson) => {
+                      if (!spotJson || !isMountedRef.current) return;
+                      const parsed: Signal[] = Array.isArray(spotJson)
+                        ? spotJson
+                        : spotJson.signals || spotJson.spot_signals || [];
+                      if (parsed.length > 0) {
+                        setSpotSignals((prev) =>
+                          mergeSignalStream(
+                            prev,
+                            parsed,
+                            settingsRef.current,
+                            true
+                          )
+                        );
+                      }
+                    })
+                    .catch(() => {});
+                }
+              }
+
+              startTransition(() => {
+                if (payload.settings) {
+                  setSettings(activeCfg);
+                  try {
+                    localStorage.setItem(
+                      LOCAL_STORAGE_SETTINGS_KEY,
+                      JSON.stringify(activeCfg)
+                    );
+                  } catch {}
+                }
+                if (Array.isArray(payload.signals)) {
+                  setSignals((prev) =>
+                    mergeSignalStream(prev, payload.signals, activeCfg, false)
+                  );
+                }
+                if (Array.isArray(payload.spot_signals)) {
+                  const isResetSnapshot =
+                    payload.spot_signals.length === 0 &&
+                    Array.isArray(payload.signals) &&
+                    payload.signals.length === 0 &&
+                    payload.stats?.total_signals === 0;
+                  if (isResetSnapshot || !accessKeyRef.current) {
+                    knownSpotKeysRef.current.clear();
+                    setSpotSignals([]);
+                  } else {
+                    setSpotSignals((prev) =>
+                      mergeSignalStream(
+                        prev,
+                        payload.spot_signals,
+                        activeCfg,
+                        true
+                      )
+                    );
+                  }
+                }
+                if (payload.stats) setStats(payload.stats);
+                if (Array.isArray(payload.walls)) setWalls(payload.walls);
+
+                if (payload.timestamp) setLastUpdated(payload.timestamp);
+                setIsInitialLoading(false);
+              });
+            }
+          } catch {
+            // Ignore malformed frames
+          }
+        };
+
+        ws.onclose = () => {
+          if (!isMountedRef.current) return;
+          setIsConnected(false);
+          if (wsRef.current === ws) {
+            wsRef.current = null;
+          }
+          reconnectTimeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current) {
+              reconnectFnRef.current();
+            }
+          }, 2000);
+        };
+
+        ws.onerror = () => {
+          ws.close();
+        };
+      } catch {
+        if (isMountedRef.current) {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current) {
+              reconnectFnRef.current();
+            }
+          }, 3000);
+        }
+      }
+    },
+    [playAlarm]
+  );
 
   useEffect(() => {
-    reconnectFnRef.current = connectWebSocket;
+    reconnectFnRef.current = () => connectWebSocket(accessKeyRef.current);
   }, [connectWebSocket]);
 
   useEffect(() => {
+    if (!authHydrated) return;
     isMountedRef.current = true;
-    fetchInitialHttpSnapshot();
-    connectWebSocket();
+    fetchInitialHttpSnapshot(accessKey);
+    connectWebSocket(accessKey);
 
     return () => {
       isMountedRef.current = false;
@@ -647,21 +740,74 @@ export function DashboardSocketProvider({
         wsRef.current = null;
       }
     };
-  }, [connectWebSocket, fetchInitialHttpSnapshot]);
+  }, [authHydrated, accessKey, connectWebSocket, fetchInitialHttpSnapshot]);
+
+  const verifyAccessKey = useCallback(
+    async (candidateKey: string): Promise<AuthRole> => {
+      const clean = (candidateKey || "").trim();
+      if (!clean) return null;
+
+      const apiBase = resolveApiBase();
+      try {
+        const res = await fetch(`${apiBase}/api/auth/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: clean }),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        const role: AuthRole =
+          data?.valid && (data?.role === "admin" || data?.role === "vip")
+            ? data.role
+            : null;
+        if (!role) return null;
+
+        accessKeyRef.current = clean;
+        authRoleRef.current = role;
+        setAccessKey(clean);
+        setAuthRole(role);
+        try {
+          localStorage.setItem(
+            LOCAL_STORAGE_AUTH_KEY,
+            JSON.stringify({ key: clean, role })
+          );
+        } catch {}
+
+        return role;
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
+  const logoutAccess = useCallback(() => {
+    accessKeyRef.current = "";
+    authRoleRef.current = null;
+    setAccessKey("");
+    setAuthRole(null);
+    knownAlphaKeysRef.current.clear();
+    knownSpotKeysRef.current.clear();
+    setSignals([]);
+    setSpotSignals([]);
+    setWalls([]);
+    try {
+      localStorage.removeItem(LOCAL_STORAGE_AUTH_KEY);
+    } catch {}
+  }, []);
 
   const triggerRefresh = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send("refresh");
     } else {
-      fetchInitialHttpSnapshot();
+      fetchInitialHttpSnapshot(accessKeyRef.current);
     }
   }, [fetchInitialHttpSnapshot]);
 
-  // 3. Instant Optimistic Save + Backend Persistence
+  // 3. Instant Optimistic Save + Backend Persistence (Requires Admin Key)
   const saveBotSettings = useCallback(
     async (newSettings: BotSettings): Promise<boolean> => {
       const normalized = normalizeBotSettings(newSettings, settingsRef.current);
-      // Update Context, active signal streams & localStorage in 0ms
       settingsRef.current = normalized;
       setSettings(normalized);
       setSignals((prev) =>
@@ -678,10 +824,16 @@ export function DashboardSocketProvider({
       } catch {}
 
       const apiBase = resolveApiBase();
+      const adminKey = accessKeyRef.current;
       try {
         const res = await fetch(`${apiBase}/api/settings`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(adminKey
+              ? { "X-Admin-Key": adminKey, "X-Access-Key": adminKey }
+              : {}),
+          },
           body: JSON.stringify(normalized),
         });
         if (!res.ok) return false;
@@ -707,9 +859,13 @@ export function DashboardSocketProvider({
 
   const resetTelemetryData = useCallback(async (): Promise<boolean> => {
     const apiBase = resolveApiBase();
+    const adminKey = accessKeyRef.current;
     try {
       const res = await fetch(`${apiBase}/api/settings/reset-telemetry`, {
         method: "POST",
+        headers: adminKey
+          ? { "X-Admin-Key": adminKey, "X-Access-Key": adminKey }
+          : undefined,
       });
       if (!res.ok) return false;
 
@@ -739,7 +895,7 @@ export function DashboardSocketProvider({
       );
 
       triggerRefresh();
-      await fetchInitialHttpSnapshot();
+      await fetchInitialHttpSnapshot(adminKey);
       return true;
     } catch {
       return false;
@@ -756,6 +912,10 @@ export function DashboardSocketProvider({
       isConnected,
       isInitialLoading,
       lastUpdated,
+      accessKey,
+      authRole,
+      verifyAccessKey,
+      logoutAccess,
       triggerRefresh,
       saveBotSettings,
       resetTelemetryData,
@@ -769,6 +929,10 @@ export function DashboardSocketProvider({
       isConnected,
       isInitialLoading,
       lastUpdated,
+      accessKey,
+      authRole,
+      verifyAccessKey,
+      logoutAccess,
       triggerRefresh,
       saveBotSettings,
       resetTelemetryData,

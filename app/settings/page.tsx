@@ -11,6 +11,7 @@ import {
   ALL_PATTERNS,
 } from "@/context/DashboardSocketContext";
 import { formatPatternName } from "@/types/types";
+import { AdminPinGate } from "@/components/AccessGates";
 import {
   Settings,
   Sliders,
@@ -39,7 +40,7 @@ const SPOT_QUANT_PATTERNS = new Set([
   "institutional_reaccumulation",
 ]);
 
-export default function ControlCenterPage() {
+function ControlCenterContent() {
   const { settings, saveBotSettings, resetTelemetryData } = useDashboardSocket();
 
   // Local form draft overlaid on global WebSocket/localStorage settings
@@ -732,5 +733,13 @@ export default function ControlCenterPage() {
         )}
       </AnimatePresence>
     </main>
+  );
+}
+
+export default function ControlCenterPage() {
+  return (
+    <AdminPinGate>
+      <ControlCenterContent />
+    </AdminPinGate>
   );
 }

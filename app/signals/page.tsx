@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence } from "framer-motion";
 import { useDashboardSocket } from "@/context/DashboardSocketContext";
 import { exportToCSV, SignalCard } from "@/components/SignalTable";
+import { VipAccessGate } from "@/components/AccessGates";
 import {
   TimeframeFilter,
   getSyncedNowMs,
@@ -43,7 +44,7 @@ type SpotStyleFilter = "ALL" | "SCALP" | "SWING";
 type SortMode = "relevance" | "confidence" | "time";
 type OutcomeFilter = "ALL" | "IN_PLAY" | "TP_HIT" | "BREAKEVEN" | "SL_HIT";
 
-export default function SignalsGridPage() {
+function SignalsGridContent() {
   const router = useRouter();
   const {
     signals,
@@ -590,5 +591,13 @@ export default function SignalsGridPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function SignalsGridPage() {
+  return (
+    <VipAccessGate>
+      <SignalsGridContent />
+    </VipAccessGate>
   );
 }

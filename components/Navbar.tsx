@@ -16,6 +16,9 @@ import {
   X,
   Wifi,
   WifiOff,
+  Lock,
+  KeyRound,
+  LogOut,
 } from "lucide-react";
 
 const NAV_LINKS = [
@@ -27,7 +30,8 @@ const NAV_LINKS = [
 function NavbarContent() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { isConnected, triggerRefresh } = useDashboardSocket();
+  const { isConnected, authRole, logoutAccess, triggerRefresh } =
+    useDashboardSocket();
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -61,6 +65,7 @@ function NavbarContent() {
           {NAV_LINKS.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
+            const isVipLocked = !authRole && item.href !== "/";
             return (
               <Link
                 key={item.href}
@@ -82,13 +87,40 @@ function NavbarContent() {
                   }`}
                 />
                 <span className="relative z-10">{item.name}</span>
+                {isVipLocked && (
+                  <Lock className="relative z-10 h-2.5 w-2.5 text-amber-400/80" />
+                )}
               </Link>
             );
           })}
         </nav>
 
-        {/* Right Controls: Live WebSocket Status + Control Center */}
+        {/* Right Controls: Auth Role Badge + Live WebSocket Status + Control Center */}
         <div className="flex items-center gap-1.5">
+          {authRole ? (
+            <button
+              onClick={logoutAccess}
+              title="Click to lock / logout VIP & Admin session"
+              className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-semibold transition ${
+                authRole === "admin"
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
+              }`}
+            >
+              <KeyRound className="h-3 w-3" />
+              <span>{authRole === "admin" ? "Admin Active" : "VIP Active"}</span>
+              <LogOut className="h-3 w-3 opacity-75" />
+            </button>
+          ) : (
+            <Link
+              href="/signals"
+              className="flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-300 transition hover:bg-amber-500/20"
+            >
+              <Lock className="h-3 w-3" />
+              <span>Unlock VIP</span>
+            </Link>
+          )}
+
           <button
             onClick={triggerRefresh}
             title="Click to force instant WebSocket sync"
@@ -143,23 +175,29 @@ function NavbarContent() {
               {NAV_LINKS.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.href);
+                const isVipLocked = !authRole && item.href !== "/";
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
                     onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-xs font-semibold ${
+                    className={`flex items-center justify-between rounded-md px-3 py-2 text-xs font-semibold ${
                       active
                         ? "bg-[#2B3139] text-white"
                         : "text-slate-400 hover:bg-[#1E2329] hover:text-slate-200"
                     }`}
                   >
-                    <Icon
-                      className={`h-3.5 w-3.5 ${
-                        active ? "text-emerald-400" : "text-slate-500"
-                      }`}
-                    />
-                    <span>{item.name}</span>
+                    <div className="flex items-center gap-2.5">
+                      <Icon
+                        className={`h-3.5 w-3.5 ${
+                          active ? "text-emerald-400" : "text-slate-500"
+                        }`}
+                      />
+                      <span>{item.name}</span>
+                    </div>
+                    {isVipLocked && (
+                      <Lock className="h-3 w-3 text-amber-400" />
+                    )}
                   </Link>
                 );
               })}

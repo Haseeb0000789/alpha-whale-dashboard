@@ -21,6 +21,7 @@ import {
 } from "@/types/types";
 import TradingChart from "@/components/TradingChart";
 import DepthChart from "@/components/DepthChart";
+import { VipAccessGate } from "@/components/AccessGates";
 import {
   ArrowLeft,
   Trophy,
@@ -74,6 +75,7 @@ function CoinDetailContent() {
     signals: wsAlphaSignals,
     spotSignals: wsSpotSignals,
     walls: wsWalls,
+    accessKey,
   } = useDashboardSocket();
   const wsSignals = useMemo(
     () => [...wsAlphaSignals, ...(wsSpotSignals || [])],
@@ -185,6 +187,7 @@ function CoinDetailContent() {
     fetch(`${apiBase}/api/coin/${encodeURIComponent(symbol)}`, {
       cache: "no-store",
       signal: controller.signal,
+      headers: accessKey ? { "X-Access-Key": accessKey } : undefined,
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data: CoinDetailData | null) => {
@@ -204,7 +207,7 @@ function CoinDetailContent() {
       clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [symbol]);
+  }, [symbol, accessKey]);
 
   // Merge API data (when ready) over Instant WebSocket Data
   const coinData: CoinDetailData | null = useMemo(() => {
@@ -587,8 +590,10 @@ function CoinDetailContent() {
 
 export default function CoinDetailPage() {
   return (
-    <Suspense fallback={<CoinDetailSkeleton />}>
-      <CoinDetailContent />
-    </Suspense>
+    <VipAccessGate>
+      <Suspense fallback={<CoinDetailSkeleton />}>
+        <CoinDetailContent />
+      </Suspense>
+    </VipAccessGate>
   );
 }

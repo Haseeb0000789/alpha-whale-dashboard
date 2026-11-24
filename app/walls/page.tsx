@@ -5,6 +5,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import WallTable from "@/components/WallTable";
 import DepthChart from "@/components/DepthChart";
+import { VipAccessGate } from "@/components/AccessGates";
 import {
   useDashboardSocket,
   resolveApiBase,
@@ -19,8 +20,8 @@ import {
   X,
 } from "lucide-react";
 
-export default function LiveWallsPage() {
-  const { walls, settings, isInitialLoading, triggerRefresh } =
+function LiveWallsContent() {
+  const { walls, settings, isInitialLoading, accessKey, triggerRefresh } =
     useDashboardSocket();
   const [searchSymbol, setSearchSymbol] = useState<string>("");
   const [selectedWallSymbol, setSelectedWallSymbol] = useState<string>("");
@@ -147,6 +148,7 @@ export default function LiveWallsPage() {
       const apiBase = resolveApiBase();
       fetch(`${apiBase}/api/depth/${encodeURIComponent(focusedSym)}`, {
         cache: "no-store",
+        headers: accessKey ? { "X-Access-Key": accessKey } : undefined,
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
@@ -172,7 +174,7 @@ export default function LiveWallsPage() {
       active = false;
       clearInterval(timer);
     };
-  }, [focusedSym, showDepthDrawer]);
+  }, [focusedSym, showDepthDrawer, accessKey]);
 
   const handleSelectWallSymbol = (sym: string) => {
     setSelectedWallSymbol(sym);
@@ -273,5 +275,13 @@ export default function LiveWallsPage() {
         onSelectSymbol={handleSelectWallSymbol}
       />
     </main>
+  );
+}
+
+export default function LiveWallsPage() {
+  return (
+    <VipAccessGate>
+      <LiveWallsContent />
+    </VipAccessGate>
   );
 }
