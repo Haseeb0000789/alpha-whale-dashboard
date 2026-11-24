@@ -67,6 +67,8 @@ export interface BidWall {
   price: number;
   usd_value: number;
   distance_pct?: number;
+  score?: number;
+  wall_score?: number;
   entry_score?: number;
   relevance_score?: number;
   respect_rate?: number;

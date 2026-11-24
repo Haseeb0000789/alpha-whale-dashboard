@@ -20,10 +20,18 @@ import {
   X,
 } from "lucide-react";
 
+function isBinanceExchange(exchange?: string | null): boolean {
+  const ex = (exchange || "").trim().toLowerCase();
+  return ex.includes("binance");
+}
+
 function LiveWallsContent() {
   const { walls, settings, isInitialLoading, accessKey, triggerRefresh } =
     useDashboardSocket();
   const [searchSymbol, setSearchSymbol] = useState<string>("");
+  const [exchangeFilter] = useState<"BINANCE">("BINANCE");
+  const [minScore, setMinScore] = useState<number>(75);
+  const [minSizeUsd, setMinSizeUsd] = useState<number>(5000);
   const [selectedWallSymbol, setSelectedWallSymbol] = useState<string>("");
   const [showDepthDrawer, setShowDepthDrawer] = useState<boolean>(false);
   const [fetchedDepthState, setFetchedDepthState] = useState<{
@@ -32,14 +40,20 @@ function LiveWallsContent() {
     bidAskRatio?: number | null;
   } | null>(null);
 
-  const minWallUsd = settings?.min_wall_usd ?? 5000;
+  const minWallUsd = Math.max(5000, minSizeUsd, settings?.min_wall_usd ?? 5000);
+  const effectiveMinScore = Math.max(75, minScore);
   const maxProximityPct = settings?.proximity_pct ?? 1.5;
 
   const filteredWalls = useMemo(() => {
-    const minSubWallUsd = Math.min(minWallUsd, 1500);
-
     return walls
       .map((w) => {
+        const wallScore = Number(
+          w.score ?? w.wall_score ?? w.entry_score ?? w.relevance_score ?? 0
+        );
+        if (wallScore < effectiveMinScore) {
+          return null;
+        }
+
         const canonicalMid =
           w.mid_price && w.mid_price > w.price
             ? w.mid_price
@@ -47,6 +61,11 @@ function LiveWallsContent() {
 
         if (w.exchange_walls && w.exchange_walls.length > 0) {
           const validExWalls = w.exchange_walls
+            .filter((ew) =>
+              exchangeFilter === "BINANCE"
+                ? isBinanceExchange(ew.exchange)
+                : true
+            )
             .map((ew) => {
               const trueDist =
                 canonicalMid > ew.price
@@ -61,7 +80,7 @@ function LiveWallsContent() {
             })
             .filter(
               (ew) =>
-                ew.usd_value >= minSubWallUsd &&
+                ew.usd_value >= minWallUsd &&
                 ew.price < canonicalMid &&
                 ew.distance_pct >= 0.01 &&
                 ew.distance_pct <= maxProximityPct
@@ -78,6 +97,9 @@ function LiveWallsContent() {
 
           return {
             ...w,
+            score: wallScore,
+            wall_score: wallScore,
+            entry_score: wallScore,
             mid_price: canonicalMid,
             price: validExWalls[0].price,
             exchange: validExWalls[0].exchange,
@@ -85,6 +107,10 @@ function LiveWallsContent() {
             usd_value: newTotal,
             exchange_walls: validExWalls,
           };
+        }
+
+        if (exchangeFilter === "BINANCE" && !isBinanceExchange(w.exchange)) {
+          return null;
         }
 
         const singleDist =
@@ -102,6 +128,9 @@ function LiveWallsContent() {
 
         return {
           ...w,
+          score: wallScore,
+          wall_score: wallScore,
+          entry_score: wallScore,
           mid_price: canonicalMid,
           distance_pct: singleDist,
         };
@@ -117,7 +146,14 @@ function LiveWallsContent() {
         }
         return true;
       });
-  }, [walls, minWallUsd, maxProximityPct, searchSymbol]);
+  }, [
+    walls,
+    minWallUsd,
+    effectiveMinScore,
+    exchangeFilter,
+    maxProximityPct,
+    searchSymbol,
+  ]);
 
   const focusedWall = useMemo(() => {
     if (selectedWallSymbol) {
@@ -183,15 +219,50 @@ function LiveWallsContent() {
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-3 sm:px-6 pb-20">
-      {/* Ultra-Slim Top Header: Total Count, Collapsible Depth Toggle, Small Search Input & Refresh */}
+      {/* Ultra-Slim Top Header: Total Count, Strict Filter Badges, Collapsible Depth Toggle, Small Search Input & Refresh */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-lg border border-[#2B3139] bg-[#161A1E] px-3.5 py-2">
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xs font-bold uppercase tracking-wider text-white sm:text-sm">
             Live Bid Walls
           </h1>
           <span className="rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-xs font-bold text-emerald-400">
             {filteredWalls.length} Active
           </span>
+          <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-bold text-amber-300">
+            Binance Only
+          </span>
+          <select
+            value={effectiveMinScore}
+            onChange={(e) => setMinScore(Math.max(75, Number(e.target.value)))}
+            aria-label="Minimum Wall Score"
+            className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-300 focus:outline-none"
+          >
+            <option value={75} className="bg-[#161A1E] text-white">
+              Score 75+
+            </option>
+            <option value={80} className="bg-[#161A1E] text-white">
+              Score 80+
+            </option>
+            <option value={85} className="bg-[#161A1E] text-white">
+              Score 85+
+            </option>
+          </select>
+          <select
+            value={minWallUsd}
+            onChange={(e) => setMinSizeUsd(Math.max(5000, Number(e.target.value)))}
+            aria-label="Minimum Wall Size USD"
+            className="rounded border border-[#2B3139] bg-[#1E2329] px-2 py-0.5 font-mono text-[11px] font-bold text-slate-200 focus:outline-none"
+          >
+            <option value={5000} className="bg-[#161A1E] text-white">
+              Min $5,000
+            </option>
+            <option value={10000} className="bg-[#161A1E] text-white">
+              Min $10,000
+            </option>
+            <option value={25000} className="bg-[#161A1E] text-white">
+              Min $25,000
+            </option>
+          </select>
         </div>
 
         <div className="flex items-center gap-2">

@@ -147,9 +147,14 @@ export default function WallTable({
           <WallCardsSkeleton count={6} />
         </div>
       ) : sortedWalls.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-[#2B3139] bg-[#1E2329] py-14 text-center text-xs text-slate-400">
+        <div className="flex flex-col items-center justify-center rounded-lg border border-[#2B3139] bg-[#1E2329] px-4 py-14 text-center text-xs text-slate-400">
           <Layers className="mb-2 h-6 w-6 opacity-40" />
-          <span>No active bid walls matching current filters.</span>
+          <span className="font-semibold text-slate-300">
+            No active Binance bid walls currently meet the 75+ Score &amp; $5,000+ minimum size filter.
+          </span>
+          <span className="mt-1 text-[11px] text-slate-500">
+            Only institutional-grade Binance L2 liquidity walls (Score &ge; 75, Value &ge; $5,000) are displayed here.
+          </span>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -157,6 +162,16 @@ export default function WallTable({
             {sortedWalls.map((wall) => {
               const cleanSym = wall.symbol.trim().toUpperCase();
               const respectPct = normalizeRespectPct(wall.respect_rate);
+              const wallScore = Math.max(
+                75,
+                Math.round(
+                  wall.score ??
+                    wall.wall_score ??
+                    wall.entry_score ??
+                    wall.relevance_score ??
+                    75
+                )
+              );
               const distPct = wall.distance_pct ?? 0.45;
               const midPrice = wall.mid_price || wall.price * (1 + distPct / 100);
               const seenIso = wall.last_seen || wall.last_seen_at;
@@ -203,6 +218,9 @@ export default function WallTable({
                           <span>{cleanSym}/USDT</span>
                           <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
                         </Link>
+                        <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-300">
+                          {wallScore} pts
+                        </span>
                       </div>
                       <div className="mt-0.5 flex items-center gap-2 font-mono text-xs">
                         <span className="text-slate-400">Mid:</span>
